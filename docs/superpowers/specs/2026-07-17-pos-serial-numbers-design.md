@@ -43,6 +43,10 @@ Checkout is blocked until every serialized line has a serial.
    unit is its own quantity-1 line with its own serial.
 7. **Checkout is hard-blocked** (server-side, unbypassable) until every serialized
    line has quantity 1, a serial property, and no serial appears twice in the cart.
+   *Caveat:* Shopify does not document validation functions running on POS
+   checkout; an early spike verifies this empirically. Fallback if unsupported:
+   soft enforcement on POS (tile badge + warnings), hard block retained for online
+   channels.
 8. Serials already assigned to another line in the current cart are excluded from
    the picker.
 
@@ -73,8 +77,13 @@ Opened from the tile. Screens:
   return to the line list.
 
 ### 3. Checkout validation function (Shopify Function, Cart & Checkout Validation API)
-Runs on Shopify's servers during POS checkout (no backend dependency). For every
-cart line whose product has the serial tag, blocks checkout unless:
+Runs on Shopify's servers with no backend dependency. **Whether validation
+functions block POS checkout is not documented by Shopify** — an early spike task
+deploys the function to a dev store and tests a real POS checkout. If POS is not
+blocked, the fallback is strong UX enforcement on POS (tile badge + modal warnings)
+while the function still protects online-channel sales; the client is informed
+either way. For every cart line whose product has the serial tag, the function
+blocks checkout (where it runs) unless:
 - quantity is exactly 1, and
 - a non-empty `Serial Number` property is present, and
 - that serial is unique within the cart.
@@ -160,18 +169,27 @@ phase-2 merge.
 
 ## To verify during implementation planning
 
-- Exact scanner API surface in the current POS UI extensions API version.
-- POS cart behaviour when splitting lines (identical variants may auto-merge until
-  distinct properties are set — set properties immediately after split).
-- Minimum POS app version for checkout validation on POS.
-- Cin7 `ProductAvailability` filter parameters (SKU + location) and the exact field
-  carrying the serial number.
+- **Spike (early plan task): whether validation functions block POS checkout at
+  all** — not documented by Shopify; verified empirically on a dev store.
+- Whether line-level `attribute(key:)` is available in the validation function's
+  input graph (verified via `shopify app function typegen`).
+- POS cart behaviour when splitting lines (identical variants may auto-merge; the
+  split adds the serial property in the same `addLineItem` call to keep lines
+  distinct — verified empirically).
+
+Resolved during planning research: scanner API is `shopify.scanner` (camera overlay
++ scan-data signal, modal target only); Cin7 `ref/productavailability` accepts an
+exact-match `Sku` parameter and returns the serial in the `Batch` field, one row
+per serial/location; extension→backend fetches get automatic auth headers with
+relative URLs (POS ≥ 10.6.0, API 2025-07+); Cin7 throttling returns 429 or 503 at
+60 calls/minute per application key.
 
 ## References
 
 - POS UI extensions: https://shopify.dev/docs/api/pos-ui-extensions/latest
 - POS Cart API: https://shopify.dev/docs/api/pos-ui-extensions/latest/target-apis/contextual-apis/cart-api
 - Cart & Checkout Validation Function API: https://shopify.dev/docs/api/functions/latest/cart-and-checkout-validation
-- Checkout validation on POS (changelog): https://changelog.shopify.com/posts/checkout-validation-for-pos-checkout
+- POS built-in checkout validation (customer details — NOT Functions; kept for
+  reference): https://changelog.shopify.com/posts/checkout-validation-for-pos-checkout
 - Cin7 Core ProductAvailability: https://help.core.cin7.com/hc/en-us/articles/9034523140879-ProductAvailability
 - Cin7 Core batch/serial numbers: https://help.core.cin7.com/hc/en-us/articles/9034605081231-Working-with-batch-and-serial-numbers
