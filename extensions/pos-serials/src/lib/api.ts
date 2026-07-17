@@ -2,11 +2,14 @@ import type {AvailableSerial} from "./serials";
 
 const tagCache = new Map<string, boolean>();
 
+let inflight: Promise<void> = Promise.resolve();
+
 export async function fetchSerializedMap(
   productIds: number[],
 ): Promise<Record<string, boolean>> {
-  const unknown = [...new Set(productIds)].filter((id) => !tagCache.has(String(id)));
-  if (unknown.length > 0) {
+  const request = inflight.then(async () => {
+    const unknown = [...new Set(productIds)].filter((id) => !tagCache.has(String(id)));
+    if (unknown.length === 0) return;
     const response = await fetch("/api/pos/product-tags", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -15,7 +18,9 @@ export async function fetchSerializedMap(
     if (!response.ok) throw new Error(`product-tags request failed: ${response.status}`);
     const {serialized} = (await response.json()) as {serialized: Record<string, boolean>};
     for (const [id, value] of Object.entries(serialized)) tagCache.set(id, Boolean(value));
-  }
+  });
+  inflight = request.catch(() => {});
+  await request;
   const map: Record<string, boolean> = {};
   for (const id of productIds) map[String(id)] = tagCache.get(String(id)) ?? false;
   return map;

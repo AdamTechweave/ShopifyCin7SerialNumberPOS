@@ -40,14 +40,16 @@ function Tile() {
 
   useEffect(() => {
     let cancelled = false;
+    let generation = 0;
 
     async function evaluate(cart: PosCart) {
+      const myGeneration = ++generation;
       try {
         const lines = cart.lineItems
           .map(toCartLine)
           .filter((line): line is CartLineLike => line !== null);
         const map = await fetchSerializedMap(lines.map((l) => l.productId));
-        if (cancelled) return;
+        if (cancelled || myGeneration !== generation) return;
         setState({
           needed: unitsNeedingSerial(lines, map),
           hasSerialized: lines.some((l) => map[String(l.productId)]),
@@ -55,7 +57,8 @@ function Tile() {
         });
       } catch {
         // Fail visible: a backend blip must not hide the workflow.
-        if (!cancelled) setState({needed: 0, hasSerialized: true, error: true});
+        if (cancelled || myGeneration !== generation) return;
+        setState({needed: 0, hasSerialized: true, error: true});
       }
     }
 
