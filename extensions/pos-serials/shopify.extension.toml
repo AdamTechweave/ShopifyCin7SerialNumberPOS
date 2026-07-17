@@ -1,0 +1,16 @@
+api_version = "2026-07"
+
+[[extensions]]
+type = "ui_extension"
+name = "Serial numbers"
+uid = "f4f45765-dd6e-63b3-446d-650dd79ff2c079a71db1"
+handle = "pos-serials"
+description = "Assign Cin7 serial numbers to serialized products at POS"
+
+  [[extensions.targeting]]
+  target = "pos.home.tile.render"
+  module = "./src/Tile.tsx"
+
+  [[extensions.targeting]]
+  target = "pos.home.modal.render"
+  module = "./src/Modal.tsx"
