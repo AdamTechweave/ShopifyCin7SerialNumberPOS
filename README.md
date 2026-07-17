@@ -114,7 +114,7 @@ README.md                                 # this file
 
 ## 3. Environment variables
 
-All five live in `.env.example`; copy it to `.env` and fill in per client. None have
+All four live in `.env.example`; copy it to `.env` and fill in per client. None have
 a merchant-facing settings UI in v1 — Techweave manages them per deployment.
 
 | Variable | Description | Where to get it |
@@ -122,12 +122,24 @@ a merchant-facing settings UI in v1 — Techweave manages them per deployment.
 | `CIN7_ACCOUNT_ID` | Cin7 Core account ID for this client. | Create an application key at `inventory.dearsystems.com/ExternalAPI` (Cin7 Core admin → Integrations & API → API). The account ID is shown alongside the key you create. |
 | `CIN7_APPLICATION_KEY` | Cin7 Core application key paired with the account ID above. | Same `inventory.dearsystems.com/ExternalAPI` screen — generate a new application key for this integration. |
 | `SERIAL_TAG` | Product tag marking a serial-tracked product. Default `serialized`. | Agreed with the client; must match the tag they apply to serialized products in Shopify admin. |
-| `SERIAL_PROPERTY_KEY` | Line item property key the chosen serial is saved under. Default `Serial Number`. | Convention; change only if the client's downstream tooling (e.g. the phase-2 allocation service) expects a different key. |
 | `CIN7_LOCATION_MAP` | JSON object mapping each Shopify location ID (string) to the matching Cin7 Core location name (string), e.g. `{"12345678":"Main Warehouse"}`. | Shopify location ID: Shopify admin → Settings → Locations → open the location → the numeric ID is in the page URL. Cin7 location name: Cin7 Core → Settings → Locations (must match exactly, case-sensitive). |
 
 `CIN7_LOCATION_MAP` is validated on load (`app/config.server.ts`): it must parse as
 JSON and be a plain object whose values are all strings — an array, a non-object, or
 any non-string value throws at startup rather than failing silently later.
+
+The line item property key the chosen serial is saved under is **not** an env
+var — it is a fixed contract, the literal string `Serial Number`, baked into
+**three places** that must be kept in sync if it is ever changed (there is no
+single source of truth to edit):
+- `extensions/pos-serials/src/lib/serials.ts`: the `SERIAL_PROPERTY_KEY`
+  constant (read/write side — tile, modal, and picker all import it).
+- `extensions/serial-validation/src/cart_validations_generate_run.graphql`:
+  the `attribute(key: "Serial Number")` literal in the function's input query.
+- The phase-2 order → Cin7 allocation service (a separate, standalone
+  repo/service — see **Architecture** above): it reads this same line item
+  property key on completed orders and is out of scope for this repo, but
+  would also need updating.
 
 ## 4. Local development
 
@@ -161,10 +173,9 @@ the root TypeScript project. Typecheck it standalone before building:
 npx tsc --noEmit -p extensions/pos-serials
 ```
 
-Run this **before** `shopify app build` / `shopify app deploy` — a stale
-`extensions/pos-serials/dist/` from a previous build can cause the standalone
-typecheck to fail even though the source is fine; delete `dist/` first if you hit
-that.
+Run this before `shopify app build` / `shopify app deploy`. The extension's
+`tsconfig.json` excludes `dist/`, so a previous build's output doesn't need to
+be cleared first.
 
 Build the web app (React Router) with:
 

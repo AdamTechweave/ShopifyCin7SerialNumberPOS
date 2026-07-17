@@ -19,7 +19,12 @@ module.exports = {
     commonjs: true,
     es6: true,
   },
-  ignorePatterns: ["!**/.server", "!**/.client"],
+  ignorePatterns: [
+    "!**/.server",
+    "!**/.client",
+    "extensions/*/generated/**",
+    "extensions/*/shopify.d.ts",
+  ],
 
   // Base config
   extends: ["eslint:recommended"],

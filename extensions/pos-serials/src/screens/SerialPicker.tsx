@@ -1,4 +1,4 @@
-import {useEffect, useState} from "preact/hooks";
+import {useEffect, useRef, useState} from "preact/hooks";
 import {fetchSerials, type SerialLookup} from "../lib/api";
 import {excludeInCart, matchScan, type CartLineLike} from "../lib/serials";
 
@@ -28,6 +28,7 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
   const [result, setResult] = useState<SerialLookup | null>(null);
   const [query, setQuery] = useState("");
   const [reload, setReload] = useState(0);
+  const choosingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,13 +48,17 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
       const candidates = excludeInCart(result.serials, cart.lineItems, line.uuid);
       const hit = matchScan(candidates, scan.data);
       if (hit) {
-        onChoose(hit.serial);
+        if (choosingRef.current) return;
+        choosingRef.current = true;
+        onChoose(hit.serial).finally(() => {
+          choosingRef.current = false;
+        });
       } else {
         shopify.toast.show(`${scan.data} is not in available stock`);
       }
     });
     return unsubscribe;
-  }, [result, cart, line.uuid]);
+  }, [result, cart, line.uuid, onChoose]);
 
   // Camera scanner lifecycle is independent of the subscribe/unsubscribe
   // effect above: only close it when the screen actually unmounts, not on

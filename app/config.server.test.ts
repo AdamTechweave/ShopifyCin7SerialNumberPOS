@@ -17,10 +17,9 @@ describe("loadConfig", () => {
     expect(() => loadConfig({CIN7_ACCOUNT_ID: "x"})).toThrow(/CIN7_APPLICATION_KEY/);
   });
 
-  it("applies defaults for tag and property key", () => {
+  it("applies defaults for tag", () => {
     const config = loadConfig(BASE_ENV);
     expect(config.serialTag).toBe("serialized");
-    expect(config.serialPropertyKey).toBe("Serial Number");
   });
 
   it("parses the location map", () => {
