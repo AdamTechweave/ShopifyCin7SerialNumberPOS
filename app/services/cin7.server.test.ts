@@ -24,6 +24,7 @@ describe("Cin7Client", () => {
     expect(url).toContain("/ExternalApi/v2/ref/productavailability");
     expect(url).toContain("Sku=WIDGET-001");
     expect(url).toContain("Limit=1000");
+    expect(url).toContain("Page=1");
     expect(init.headers["api-auth-accountid"]).toBe("acct");
     expect(init.headers["api-auth-applicationkey"]).toBe("key");
   });
@@ -50,6 +51,14 @@ describe("Cin7Client", () => {
     const downFetch = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
     await expect(new Cin7Client("a", "k", downFetch).getAvailability("X"))
       .rejects.toMatchObject({code: "UNREACHABLE"});
+  });
+
+  it("throws BAD_RESPONSE on other non-OK statuses", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client.getAvailability("X").catch((e) => e);
+    expect(error).toBeInstanceOf(Cin7Error);
+    expect(error).toMatchObject({code: "BAD_RESPONSE"});
   });
 
   it("skuExists checks the product endpoint", async () => {
