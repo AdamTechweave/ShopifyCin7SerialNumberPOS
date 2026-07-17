@@ -1,237 +1,290 @@
-# Shopify App Template - React Router
+# Cin7 Serial Products — POS Serial Number Selection
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
+A Shopify app (internal Techweave tool, one deployment per client) that lets retail
+staff assign Cin7 Core serial numbers to products at the point of sale. When a
+serial-tracked product (identified by a product tag, default `serialized`) is added
+to the POS cart, a smart-grid tile highlights and shows how many lines still need a
+serial. Tapping the tile opens a modal that looks up available serial numbers from
+Cin7 Core by SKU across all warehouse locations (current store first); staff pick one
+by tapping, searching, or scanning the unit's barcode, and it is saved as a
+`Serial Number` line item property on that cart line. A quantity > 1 serialized line
+is split so every unit gets its own line and its own serial. A Shopify Function on
+the Cart & Checkout Validation API is deployed alongside the POS extension to block
+checkout until every serialized line has exactly one unit, a serial, and no serial
+duplicated in the cart — see the **Known limitations** section below for the current
+verification status of that block on POS specifically.
 
-Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
+Full design: `docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md`.
 
-Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-react-router) for more details on the React Router app package.
+## 1. What this app does
 
-## Upgrading from Remix
+Retail staff scan or add a serialized product to the POS cart. The **Serial
+numbers** smart-grid tile lights up (accent tone) with a count of lines still
+missing a serial. Tapping it opens a modal listing every serialized cart line and
+its status; tapping a line opens a picker that queries Cin7 Core's
+`ref/productavailability` endpoint for that SKU, grouping results by location (the
+current POS location's stock first, other locations below) and excluding any
+serial already used by another line in the current cart. Staff select a serial by
+tap, by typing into the search box, or by scanning the unit's barcode with the
+device camera (an exact match auto-selects; a non-matching scan is rejected with an
+explanatory message). If the line's quantity is greater than 1, selecting a serial
+splits off a quantity-1 sibling line so each unit ends up on its own line with its
+own serial. A Cart & Checkout Validation Function (`serial-validation`) enforces
+server-side that every serialized line has quantity 1, a non-empty serial, and no
+serial repeated in the cart — this function definitely blocks online-channel
+checkout; whether Shopify runs it on POS checkout is an open question tracked by
+the spike below.
 
-If you have an existing Remix app that you want to upgrade to React Router, please follow the [upgrade guide](https://github.com/Shopify/shopify-app-template-react-router/wiki/Upgrading-from-Remix). Otherwise, please follow the quick start guide below.
+## 2. Architecture
 
-## Quick start
+Four parts, one app per client:
 
-### Prerequisites
+1. **POS UI extension — tile** (`pos.home.tile.render`). Subscribes to the live
+   POS cart, batches unknown product IDs to the backend to resolve which lines are
+   serialized (session-cached in the extension), and renders the tile state
+   (disabled/neutral, accent + count, or "Serials complete").
+2. **POS UI extension — modal** (`pos.home.modal.render`). A line list screen (always
+   re-reads live cart state on focus) and a serial-picker screen per line (fetches
+   from the backend by SKU + current POS location ID, groups by location, filters
+   out serials already used elsewhere in the cart, supports search and barcode
+   scan, and performs the qty-1 split + property write on selection).
+3. **Checkout validation function** (Shopify Function, Cart & Checkout Validation
+   API, handle `serial-validation`). Runs on Shopify's servers with no dependency on
+   the app backend. Blocks checkout unless every line whose product carries the
+   serial tag has quantity 1, a non-empty `Serial Number` attribute, and a
+   cart-unique serial. The tag literal is baked into the function's GraphQL input
+   query at deploy time (see the per-client rollout checklist below for what to
+   edit if a client's tag differs from `serialized`).
+4. **App backend** (React Router / Node, the Shopify app template server).
+   Authenticates POS extension requests via `authenticate.public.checkout`
+   (session-token validation; there is no `authenticate.public.pos` helper in this
+   CLI/template combination). Exposes:
+   - `POST /api/pos/product-tags` — batched product ID → is-serialized map, via the
+     Admin API.
+   - `GET /api/pos/serials?sku=&locationId=` — maps the Shopify location to its
+     configured Cin7 location name, queries Cin7 Core, keeps rows with available
+     stock > 0, orders current location first.
+   Cin7 availability responses are cached in-process for 45 seconds per SKU to stay
+   under Cin7's ~60 calls/minute rate limit.
 
-Before you begin, you'll need to [download and install the Shopify CLI](https://shopify.dev/docs/apps/tools/cli/getting-started) if you haven't already.
+**Phase 2 (out of scope for this app):** an existing standalone Node/TypeScript
+service consumes completed Shopify orders and allocates the sold serial number on
+the matching Cin7 Core sale. It already works off the `Serial Number` line item
+property this app writes; merging it into this backend is a separate, later
+effort.
 
-### Setup
+### Repo layout
 
-```shell
-shopify app init --template=https://github.com/Shopify/shopify-app-template-react-router
+```
+shopify.app.toml                          # app config: name, client_id, scopes
+.env.example                              # per-client config template
+vitest.config.ts                          # root test runner (app + extensions)
+app/
+  shopify.server.ts                       # Shopify app template auth setup
+  config.server.ts                        # per-client env config (getConfig/loadConfig)
+  services/
+    cache.server.ts                       # generic TTL cache
+    cin7.server.ts                        # Cin7 Core HTTP client
+    serials.server.ts                     # location grouping + SerialService (cached)
+    tags.server.ts                        # product GID + serialized-map helpers
+  routes/
+    api.pos.serials.tsx                   # GET serials by SKU + location
+    api.pos.product-tags.tsx              # POST product IDs -> serialized map
+extensions/
+  serial-validation/                      # Cart & Checkout Validation Function
+    shopify.extension.toml
+    src/cart_validations_generate_run.graphql   # input query; tag literal lives here
+    src/cart_validations_generate_run.js
+    src/cart_validations_generate_run.test.js
+  pos-serials/                            # POS UI extension
+    shopify.extension.toml
+    src/Tile.tsx
+    src/Modal.tsx
+    src/screens/LineList.tsx
+    src/screens/SerialPicker.tsx
+    src/lib/serials.ts                    # pure cart/serial logic
+    src/lib/assignSerial.ts               # rollback-safe split + property write
+    src/lib/api.ts                        # backend fetch helpers
+docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md   # design doc
+docs/superpowers/notes/2026-07-pos-validation-spike.md           # POS-block spike (verdict pending)
+README.md                                 # this file
 ```
 
-### Local Development
+## 3. Environment variables
 
-```shell
-shopify app dev
+All five live in `.env.example`; copy it to `.env` and fill in per client. None have
+a merchant-facing settings UI in v1 — Techweave manages them per deployment.
+
+| Variable | Description | Where to get it |
+|---|---|---|
+| `CIN7_ACCOUNT_ID` | Cin7 Core account ID for this client. | Create an application key at `inventory.dearsystems.com/ExternalAPI` (Cin7 Core admin → Integrations & API → API). The account ID is shown alongside the key you create. |
+| `CIN7_APPLICATION_KEY` | Cin7 Core application key paired with the account ID above. | Same `inventory.dearsystems.com/ExternalAPI` screen — generate a new application key for this integration. |
+| `SERIAL_TAG` | Product tag marking a serial-tracked product. Default `serialized`. | Agreed with the client; must match the tag they apply to serialized products in Shopify admin. |
+| `SERIAL_PROPERTY_KEY` | Line item property key the chosen serial is saved under. Default `Serial Number`. | Convention; change only if the client's downstream tooling (e.g. the phase-2 allocation service) expects a different key. |
+| `CIN7_LOCATION_MAP` | JSON object mapping each Shopify location ID (string) to the matching Cin7 Core location name (string), e.g. `{"12345678":"Main Warehouse"}`. | Shopify location ID: Shopify admin → Settings → Locations → open the location → the numeric ID is in the page URL. Cin7 location name: Cin7 Core → Settings → Locations (must match exactly, case-sensitive). |
+
+`CIN7_LOCATION_MAP` is validated on load (`app/config.server.ts`): it must parse as
+JSON and be a plain object whose values are all strings — an array, a non-object, or
+any non-string value throws at startup rather than failing silently later.
+
+## 4. Local development
+
+```bash
+npm install
+cp .env.example .env      # then fill in Cin7 credentials + location map for this client
+npm run dev                # shopify app dev
 ```
 
-Press P to open the URL to your app. Once you click install, you can start development.
+`npm run dev` runs `shopify app dev`: it logs into Partners, connects to the linked
+app, opens a tunnel, and prints a URL — press `P` to open it and install on your dev
+store. It also starts POS developer mode; open the Shopify POS app on a device or
+simulator, sign in with the same store, and enable developer preview to see the
+`pos-serials` extension's tile and modal live (POS ≥ 10.6.0 required for the
+automatic-auth backend fetches the extension relies on).
 
-Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/tools/cli). It logs into your account, connects to an app, provides environment variables, updates remote config, creates a tunnel and provides commands to generate extensions.
+Run the test suite:
 
-### Authenticating and querying data
-
-To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.js`:
-
-```js
-export async function loader({ request }) {
-  const { admin } = await shopify.authenticate.admin(request);
-
-  const response = await admin.graphql(`
-    {
-      products(first: 25) {
-        nodes {
-          title
-          description
-        }
-      }
-    }`);
-
-  const {
-    data: {
-      products: { nodes },
-    },
-  } = await response.json();
-
-  return nodes;
-}
+```bash
+npm test
 ```
 
-This template comes pre-configured with examples of:
+This runs `vitest run` across both the app backend (`app/**/*.test.ts`) and the
+extensions (`extensions/**/src/**/*.test.{ts,js}`) in one pass — **48 tests across 8
+files**, currently all passing.
 
-1. Setting up your Shopify app in [/app/shopify.server.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/shopify.server.ts)
-2. Querying data using Graphql. Please see: [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx).
-3. Responding to webhooks. Please see [/app/routes/webhooks.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/webhooks.app.uninstalled.tsx).
-4. Using metafields, metaobjects, and declarative custom data definitions. Please see [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx) and [shopify.app.toml](https://github.com/Shopify/shopify-app-template-react-router/blob/main/shopify.app.toml).
+The POS extension has its own `tsconfig.json` (Preact JSX, non-strict) excluded from
+the root TypeScript project. Typecheck it standalone before building:
 
-Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
-
-## Shopify Dev MCP
-
-This template is configured with the Shopify Dev MCP. This instructs [Cursor](https://cursor.com/), [GitHub Copilot](https://github.com/features/copilot) and [Claude Code](https://claude.com/product/claude-code) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) to use the Shopify Dev MCP.
-
-For more information on the Shopify Dev MCP please read [the documentation](https://shopify.dev/docs/apps/build/devmcp).
-
-## Deployment
-
-### Application Storage
-
-This template uses [Prisma](https://www.prisma.io/) to store session data, by default using an [SQLite](https://www.sqlite.org/index.html) database.
-The database is defined as a Prisma schema in `prisma/schema.prisma`.
-
-This use of SQLite works in production if your app runs as a single instance.
-The database that works best for you depends on the data your app needs and how it is queried.
-Here’s a short list of databases providers that provide a free tier to get started:
-
-| Database   | Type             | Hosters                                                                                                                                                                                                                                    |
-| ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| MySQL      | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mysql), [Planet Scale](https://planetscale.com/), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/mysql) |
-| PostgreSQL | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-postgresql), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/postgres)                                   |
-| Redis      | Key-value        | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-redis), [Amazon MemoryDB](https://aws.amazon.com/memorydb/)                                                                                                        |
-| MongoDB    | NoSQL / Document | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mongodb), [MongoDB Atlas](https://www.mongodb.com/atlas/database)                                                                                                  |
-
-To use one of these, you can use a different [datasource provider](https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#datasource) in your `schema.prisma` file, or a different [SessionStorage adapter package](https://github.com/Shopify/shopify-api-js/blob/main/packages/shopify-api/docs/guides/session-storage.md).
-
-### Build
-
-Build the app by running the command below with the package manager of your choice:
-
-Using yarn:
-
-```shell
-yarn build
+```bash
+npx tsc --noEmit -p extensions/pos-serials
 ```
 
-Using npm:
+Run this **before** `shopify app build` / `shopify app deploy` — a stale
+`extensions/pos-serials/dist/` from a previous build can cause the standalone
+typecheck to fail even though the source is fine; delete `dist/` first if you hit
+that.
 
-```shell
+Build the web app (React Router) with:
+
+```bash
 npm run build
 ```
 
-Using pnpm:
+Note: `extensions/pos-serials/shopify.d.ts` is regenerated by the CLI on every
+`shopify app build` / `shopify app dev` run (it reappears with ambient type blocks
+even after being edited or deleted) — this is expected CLI behavior, not a bug.
 
-```shell
-pnpm run build
-```
+## 5. Per-client rollout checklist
 
-## Hosting
+1. **Create the client's app** in the Techweave Partner org. Set distribution to
+   **custom** (this is never a public/listed app). Install it on the client's store.
+2. **Create a Cin7 application key** for this client at
+   `inventory.dearsystems.com/ExternalAPI`, then fill in `.env` (or the hosting
+   platform's env vars): `CIN7_ACCOUNT_ID`, `CIN7_APPLICATION_KEY`.
+3. **Build `CIN7_LOCATION_MAP`** covering every Shopify location that has a POS
+   register for this client, mapping each Shopify location ID to the exact Cin7
+   Core location name.
+4. **If the client's serial tag isn't `serialized`**, change it in **two places**
+   (both are required — the function's tag check does not read the env var):
+   - `.env`: set `SERIAL_TAG=<their tag>` (used by the backend's tag lookup).
+   - `extensions/serial-validation/src/cart_validations_generate_run.graphql`: edit
+     the `hasAnyTag(tags: ["serialized"])` literal to the client's tag.
+5. **Tag serialized products** in the client's Shopify catalog with that tag, and
+   confirm each serialized product's SKU matches its Cin7 Core SKU **exactly**
+   (SKU mismatch is a hard failure mode — see the design doc's error-handling
+   table).
+6. **Deploy:**
+   ```bash
+   npm run deploy    # shopify app deploy
+   ```
+   On this CLI version (`@shopify/cli` 4.5.1) the update flag is `--allow-updates`,
+   not `--force` — `shopify app deploy` already applies it as needed; you shouldn't
+   need to pass extra flags for a routine per-client deploy.
+7. **Activate the validation.** While `shopify app dev` is running, open its
+   GraphiQL (dev console link in the CLI output) against the client's store and run
+   this mutation exactly as written:
 
-When you're ready to set up your app in production, you can follow [our deployment documentation](https://shopify.dev/docs/apps/launch/deployment) to host it externally. From there, you have a few options:
+   ```graphql
+   mutation {
+     validationCreate(validation: {
+       functionHandle: "serial-validation"
+       enable: true
+       blockOnFailure: true
+       title: "Serial numbers required"
+     }) {
+       validation { id enabled blockOnFailure }
+       userErrors { field message }
+     }
+   }
+   ```
 
-- [Google Cloud Run](https://shopify.dev/docs/apps/launch/deployment/deploy-to-google-cloud-run): This tutorial is written specifically for this example repo, and is compatible with the extended steps included in the subsequent [**Build your app**](tutorial) in the **Getting started** docs. It is the most detailed tutorial for taking a React Router-based Shopify app and deploying it to production. It includes configuring permissions and secrets, setting up a production database, and even hosting your apps behind a load balancer across multiple regions.
-- [Fly.io](https://fly.io/docs/js/shopify/): Leverages the Fly.io CLI to quickly launch Shopify apps to a single machine.
-- [Render](https://render.com/docs/deploy-shopify-app): This tutorial guides you through using Docker to deploy and install apps on a Dev store.
-- [Manual deployment guide](https://shopify.dev/docs/apps/launch/deployment/deploy-to-hosting-service): This resource provides general guidance on the requirements of deployment including environment variables, secrets, and persistent data.
+   Expect `userErrors: []`. Confirm in the client's Shopify admin under
+   **Settings → Checkout → Checkout Rules** that "Serial numbers required" shows as
+   active.
+8. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed. Add the
+   "Serial numbers" tile to the smart grid on each register (POS app → smart grid
+   layout → add tile).
 
-When you reach the step for [setting up environment variables](https://shopify.dev/docs/apps/deployment/web#set-env-vars), you also need to set the variable `NODE_ENV=production`.
+## 6. Acceptance checklist
 
-## Gotchas / Troubleshooting
+Run this on a real POS device against the client's store before calling rollout
+done (from the design spec's acceptance criteria):
 
-### Database tables don't exist
+- [ ] Adding a serialized product to the cart lights up the tile with an accurate
+      "N serials needed" count.
+- [ ] Tapping the tile opens the modal with the correct serialized lines listed.
+- [ ] Picking a serial for a quantity > 1 line splits it into quantity-1 lines, each
+      with its own serial.
+- [ ] Scanning a unit's barcode in the picker auto-selects the matching serial; a
+      non-matching scan shows an explanatory rejection, not a silent no-op.
+- [ ] Serials from other store locations appear in the picker, grouped below the
+      current location's stock, and are selectable.
+- [ ] Attempting checkout with a missing/duplicate serial or quantity > 1 on a
+      serialized line is **blocked with the expected message** — *this step's
+      outcome on POS specifically is the subject of the pending spike; see Known
+      limitations.* The function reliably blocks online checkout regardless.
+- [ ] With Cin7 unreachable (or credentials wrong), the picker shows a clear
+      "Can't reach Cin7" state with retry, and non-serialized items still sell
+      normally.
 
-If you get an error like:
+## 7. Known limitations
 
-```
-The table `main.Session` does not exist in the current database.
-```
-
-Create the database for Prisma. Run the `setup` script in `package.json` using `npm`, `yarn` or `pnpm`.
-
-### Navigating/redirecting breaks an embedded app
-
-Embedded apps must maintain the user session, which can be tricky inside an iFrame. To avoid issues:
-
-1. Use `Link` from `react-router` or `@shopify/polaris`. Do not use `<a>`.
-2. Use `redirect` returned from `authenticate.admin`. Do not use `redirect` from `react-router`
-3. Use `useSubmit` from `react-router`.
-
-This only applies if your app is embedded, which it will be by default.
-
-### Webhooks: shop-specific webhook subscriptions aren't updated
-
-If you are registering webhooks in the `afterAuth` hook, using `shopify.registerWebhooks`, you may find that your subscriptions aren't being updated.
-
-Instead of using the `afterAuth` hook declare app-specific webhooks in the `shopify.app.toml` file. This approach is easier since Shopify will automatically sync changes every time you run `deploy` (e.g: `npm run deploy`). Please read these guides to understand more:
-
-1. [app-specific vs shop-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions)
-2. [Create a subscription tutorial](https://shopify.dev/docs/apps/build/webhooks/subscribe/get-started?deliveryMethod=https)
-
-If you do need shop-specific webhooks, keep in mind that the package calls `afterAuth` in 2 scenarios:
-
-- After installing the app
-- When an access token expires
-
-During normal development, the app won't need to re-authenticate most of the time, so shop-specific subscriptions aren't updated. To force your app to update the subscriptions, uninstall and reinstall the app. Revisiting the app will call the `afterAuth` hook.
-
-### Webhooks: Admin created webhook failing HMAC validation
-
-Webhooks subscriptions created in the [Shopify admin](https://help.shopify.com/en/manual/orders/notifications/webhooks) will fail HMAC validation. This is because the webhook payload is not signed with your app's secret key.
-
-The recommended solution is to use [app-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions) defined in your toml file instead. Test your webhooks by triggering events manually in the Shopify admin(e.g. Updating the product title to trigger a `PRODUCTS_UPDATE`).
-
-### Webhooks: Admin object undefined on webhook events triggered by the CLI
-
-When you trigger a webhook event using the Shopify CLI, the `admin` object will be `undefined`. This is because the CLI triggers an event with a valid, but non-existent, shop. The `admin` object is only available when the webhook is triggered by a shop that has installed the app. This is expected.
-
-Webhooks triggered by the CLI are intended for initial experimentation testing of your webhook configuration. For more information on how to test your webhooks, see the [Shopify CLI documentation](https://shopify.dev/docs/apps/tools/cli/commands#webhook-trigger).
-
-### Incorrect GraphQL Hints
-
-By default the [graphql.vscode-graphql](https://marketplace.visualstudio.com/items?itemName=GraphQL.vscode-graphql) extension for will assume that GraphQL queries or mutations are for the [Shopify Admin API](https://shopify.dev/docs/api/admin). This is a sensible default, but it may not be true if:
-
-1. You use another Shopify API such as the storefront API.
-2. You use a third party GraphQL API.
-
-If so, please update [.graphqlrc.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/.graphqlrc.ts).
-
-### Using Defer & await for streaming responses
-
-By default the CLI uses a cloudflare tunnel. Unfortunately cloudflare tunnels wait for the Response stream to finish, then sends one chunk. This will not affect production.
-
-To test [streaming using await](https://reactrouter.com/api/components/Await#await) during local development we recommend [localhost based development](https://shopify.dev/docs/apps/build/cli-for-apps/networking-options#localhost-based-development).
-
-### "nbf" claim timestamp check failed
-
-This is because a JWT token is expired. If you are consistently getting this error, it could be that the clock on your machine is not in sync with the server. To fix this ensure you have enabled "Set time and date automatically" in the "Date and Time" settings on your computer.
-
-### Using MongoDB and Prisma
-
-If you choose to use MongoDB with Prisma, there are some gotchas in Prisma's MongoDB support to be aware of. Please see the [Prisma SessionStorage README](https://www.npmjs.com/package/@shopify/shopify-app-session-storage-prisma#mongodb).
-
-### Unable to require(`C:\...\query_engine-windows.dll.node`).
-
-Unable to require(`C:\...\query_engine-windows.dll.node`).
-The Prisma engines do not seem to be compatible with your system.
-
-query_engine-windows.dll.node is not a valid Win32 application.
-
-**Fix:** Set the environment variable:
-
-```shell
-PRISMA_CLIENT_ENGINE_TYPE=binary
-```
-
-This forces Prisma to use the binary engine mode, which runs the query engine as a separate process and can work via emulation on Windows ARM64.
-
-## Resources
-
-React Router:
-
-- [React Router docs](https://reactrouter.com/home)
-
-Shopify:
-
-- [Intro to Shopify apps](https://shopify.dev/docs/apps/getting-started)
-- [Shopify App React Router docs](https://shopify.dev/docs/api/shopify-app-react-router)
-- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli)
-- [Shopify App Bridge](https://shopify.dev/docs/api/app-bridge-library).
-- [Polaris Web Components](https://shopify.dev/docs/api/app-home/polaris-web-components).
-- [App extensions](https://shopify.dev/docs/apps/app-extensions/list)
-- [Shopify Functions](https://shopify.dev/docs/api/functions)
-
-Internationalization:
-
-- [Internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
+- **POS hard-block is not yet verified.** Shopify does not document whether Cart &
+  Checkout Validation Functions run on POS checkout at all — this is the single
+  riskiest unknown in the project. `docs/superpowers/notes/2026-07-pos-validation-spike.md`
+  tracks it; as of this writing its verdict is **PENDING HUMAN TEST** (deploy is
+  done, but the online control test and the real-device POS test have not been
+  run/recorded yet). Until that spike lands with a **GO**, do not tell a client that
+  POS checkout is hard-blocked — only that the online storefront is, and that POS
+  enforcement today is the tile/modal UX (staff are strongly steered but not
+  technically prevented from completing a POS sale without a serial). If the
+  eventual verdict is **NO-GO**, that UX-only behavior becomes the permanent POS
+  story and should be called out to the client explicitly.
+- **Cin7 outage blocks serialized checkout.** This is a deliberate trade-off, not a
+  bug: if Cin7 Core is unreachable or rate-limited, serialized lines cannot get a
+  verified serial, so those sales cannot complete (non-serialized items are
+  unaffected). A staff emergency override is a possible future addition, out of
+  scope for v1.
+- **45-second staleness window.** Cin7 availability responses are cached per SKU
+  for 45 seconds (`app/services/serials.server.ts`) to respect Cin7's ~60
+  calls/minute rate limit. Two registers selling the last unit of a SKU within that
+  window could both see it as available; Cin7 itself is the source of truth at
+  actual allocation time.
+- **Serials are not reserved until the sale completes.** Picking a serial in the
+  modal does not lock it in Cin7 — another register could pick the same serial
+  before either sale finishes. This app does not implement reservation/locking (see
+  the design doc's "Approach B" note for a possible future upgrade path).
+- **Phase 2 (order → Cin7 allocation) is out of scope here.** This app only writes
+  the `Serial Number` line item property; a separate standalone service consumes
+  completed orders and applies the sold serial to the Cin7 sale. Merging that
+  service into this backend is tracked as its own future effort — see
+  `docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md` ("Phase 2" /
+  "Out of scope (v1)").
+- **`@shopify/ui-extensions` version pin.** `extensions/pos-serials/package.json`
+  pins `@shopify/ui-extensions` to `2025.10.x` while the extension's
+  `api_version` is `2026-07`; the scanner camera APIs used by the barcode-scan
+  picker are bridged with a type cast because the pinned package's types predate
+  `2026-07`. A deliberate version bump (with a re-check of the scanner types) is
+  recommended before this becomes a maintenance burden.
+- **No merchant-facing settings UI.** All per-client configuration is env vars,
+  managed by Techweave — see the per-client rollout checklist above.
