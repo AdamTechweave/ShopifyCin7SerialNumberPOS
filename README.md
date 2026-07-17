@@ -31,9 +31,9 @@ explanatory message). If the line's quantity is greater than 1, selecting a seri
 splits off a quantity-1 sibling line so each unit ends up on its own line with its
 own serial. A Cart & Checkout Validation Function (`serial-validation`) enforces
 server-side that every serialized line has quantity 1, a non-empty serial, and no
-serial repeated in the cart — this function definitely blocks online-channel
-checkout; whether Shopify runs it on POS checkout is an open question tracked by
-the spike below.
+serial repeated in the cart — live blocking behavior (online and POS channels) is
+verified during the spike tracked below (see docs/superpowers/notes/2026-07-pos-validation-spike.md,
+verdict pending).
 
 ## 2. Architecture
 
@@ -52,11 +52,11 @@ Four parts, one app per client:
    API, handle `serial-validation`). Runs on Shopify's servers with no dependency on
    the app backend. Its logic blocks checkout unless every line whose product
    carries the serial tag has quantity 1, a non-empty `Serial Number` attribute, and
-   a cart-unique serial — confirmed working for online-channel checkout; whether
-   Shopify runs this function on POS checkout at all is unverified (see **Known
-   limitations**). The tag literal is baked into the function's GraphQL input
-   query at deploy time (see the per-client rollout checklist below for what to
-   edit if a client's tag differs from `serialized`).
+   a cart-unique serial — the unit-tested rules are embedded; live blocking behavior
+   across channels is verified during the spike (see **Known limitations**). The tag
+   literal is baked into the function's GraphQL input query at deploy time (see the
+   per-client rollout checklist below for what to edit if a client's tag differs
+   from `serialized`).
 4. **App backend** (React Router / Node, the Shopify app template server).
    Authenticates POS extension requests via `authenticate.public.checkout`
    (session-token validation; there is no `authenticate.public.pos` helper in this
@@ -243,8 +243,8 @@ done (from the design spec's acceptance criteria):
       current location's stock, and are selectable.
 - [ ] Attempting checkout with a missing/duplicate serial or quantity > 1 on a
       serialized line is **blocked with the expected message** — *this step's
-      outcome on POS specifically is the subject of the pending spike; see Known
-      limitations.* The function reliably blocks online checkout regardless.
+      outcome across channels is the subject of the pending spike; see Known
+      limitations.* (Verdict pending — see docs/superpowers/notes/2026-07-pos-validation-spike.md)
 - [ ] With Cin7 unreachable (or credentials wrong), the picker shows a clear
       "Can't reach Cin7" state with retry, and non-serialized items still sell
       normally.
