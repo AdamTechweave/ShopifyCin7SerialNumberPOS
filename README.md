@@ -50,9 +50,11 @@ Four parts, one app per client:
    scan, and performs the qty-1 split + property write on selection).
 3. **Checkout validation function** (Shopify Function, Cart & Checkout Validation
    API, handle `serial-validation`). Runs on Shopify's servers with no dependency on
-   the app backend. Blocks checkout unless every line whose product carries the
-   serial tag has quantity 1, a non-empty `Serial Number` attribute, and a
-   cart-unique serial. The tag literal is baked into the function's GraphQL input
+   the app backend. Its logic blocks checkout unless every line whose product
+   carries the serial tag has quantity 1, a non-empty `Serial Number` attribute, and
+   a cart-unique serial — confirmed working for online-channel checkout; whether
+   Shopify runs this function on POS checkout at all is unverified (see **Known
+   limitations**). The tag literal is baked into the function's GraphQL input
    query at deploy time (see the per-client rollout checklist below for what to
    edit if a client's tag differs from `serialized`).
 4. **App backend** (React Router / Node, the Shopify app template server).
