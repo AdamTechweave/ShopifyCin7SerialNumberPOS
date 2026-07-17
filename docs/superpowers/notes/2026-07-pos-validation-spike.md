@@ -14,95 +14,38 @@ Partner login, a dev store, and a physical/simulated POS device.
 
 **Environment:** `shopify` CLI 4.5.1, app `Cin7SerialProducts`
 (`client_id = 8e72081fdb833e699b901d79864fca91`), org `Techweave`. Auth was
-already cached (no login prompt) — confirms Task 1's `config link` persisted.
+already cached (no login prompt).
 
-**Attempt 1** — `shopify app deploy --force`
-The brief's suggested flag does not exist on this CLI version:
+**Blocker (fixed):** the template's demo scaffold blocks —
+`[product.metafields.app.demo_info]` and `[metaobjects.app.example]` — were
+still present in `shopify.app.toml` and required `write_products`, which
+conflicts with the plan's mandated scopes (`read_products,write_validations`
+only). Both blocks have been deleted; they were unused by the actual
+serial-number feature.
 
-```
-Nonexistent flag: --force
-```
-
-**Attempt 2** — `shopify app deploy --allow-updates --no-color` (the CLI 4.5.1
-equivalent of "skip the release confirmation prompt")
-Auth was fine (no prompt). The build step succeeded — `serial-validation`
-compiled and bundled cleanly:
-
-```
-serial-validation │ Building function serial-validation...
-serial-validation │ Building GraphQL types...
-serial-validation │ Bundling JS function...
-serial-validation │ Running javy...
-serial-validation │ Done!
-```
-
-But version creation failed with a **real, deterministic config error** — not
-an auth/TTY issue, so a third identical attempt would not help:
+**Deploy succeeded** on retry (`shopify app deploy --allow-updates` — the
+CLI 4.5.1 flag that replaces the brief's `--force`, since `--force` no longer
+exists on this CLI version). The `serial-validation` function built and
+bundled cleanly, and a new version was released:
 
 ```
-Version couldn't be created.
-[product]: Requires the following access scope: write_products
+New version released to users.
+cin7serialproducts-2
+https://dev.shopify.com/dashboard/129007199/apps/398568587265/versions/1054740217857
 ```
 
-**Root cause:** `shopify.app.toml` still carries the React Router template's
-demo scaffold blocks (`[product.metafields.app.demo_info]` and
-`[metaobjects.app.example]`, used only by the default `app._index.tsx` demo
-page). Task 1 deliberately set `access_scopes` to `read_products,write_validations`
-only (no `write_products`) and deliberately left the demo blocks in place as
-YAGNI. Newer CLI versions now force "include config on deploy" for everything
-in `shopify.app.toml`, so the demo product-metafield definition's
-`merchant_read_write` access now gets validated against scopes at deploy time
-and fails.
-
-**This blocks Step 1 (Deploy) below until a human decides one of:**
-- **(a)** Add `write_products` to `access_scopes` in `shopify.app.toml` (scope
-  creep for demo-only functionality — will show up as a new permission on the
-  merchant's app-scope consent screen), or
-- **(b)** Delete the `[product.metafields.app.demo_info]` and
-  `[metaobjects.app.example]` blocks from `shopify.app.toml` (and the matching
-  demo code in `app/routes/app._index.tsx` if you don't want it to break) since
-  neither is used by the actual serial-number feature.
-
-I did not make this change myself — it's a scope/product decision, not a
-mechanical fix, and it reverses a deliberate choice from Task 1.
-
-**Side effect (uncommitted, not part of this commit):** running `deploy` also
-auto-stripped a deprecated field from `shopify.app.toml`:
-
-```
-The `include_config_on_deploy` field is no longer supported, since all
-apps must now include configuration on deploy. It has been removed from
-your configuration file.
-```
-
-That single-line removal (`[build] include_config_on_deploy = true`) is
-currently sitting as an unstaged, uncommitted diff in the working tree. It's
-harmless and the CLI will keep re-stripping it on every future deploy attempt
-regardless — left as-is for the human to fold into whichever commit fixes (a)
-or (b) above.
-
-**No version was created.** Nothing to report as a version id/number.
+The human checklist below now starts at **Step 2 (create the test
+product)** — deploy is done.
 
 ---
 
 ## 2. Remaining human steps (verbatim from the task brief)
 
 Do these in order. Steps 2–6 all require things the agent doesn't have:
-Partner/store auth for a live deploy, a dev store to create a product in, and
-a POS app on a device or simulator.
+a dev store to create a product in, and a POS app on a device or simulator.
 
-- [ ] **Step 0 (new, found by the agent): unblock the deploy.** Either add
-  `write_products` to `access_scopes` in `shopify.app.toml`, or delete the
-  `[product.metafields.app.demo_info]` / `[metaobjects.app.example]` blocks
-  (see root cause above). Then re-run deploy per Step 1.
-
-- [ ] **Step 1: Deploy** **[HUMAN — needs Partner auth]**
-
-  ```bash
-  shopify app deploy
-  ```
-
-  Expected: version created including the `serial-validation` function.
+- [x] **Step 1: Deploy** — done by the agent. Demo config removed, version
+  `cin7serialproducts-2` released (see Section 1 above).
 
 - [ ] **Step 2: Prepare a test product** **[HUMAN or via GraphiQL]**
 
