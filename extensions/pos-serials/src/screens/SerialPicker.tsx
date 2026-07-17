@@ -12,12 +12,18 @@ interface Props {
 export function SerialPicker({line, cart, onDone, onChoose}: Props) {
   const [result, setResult] = useState<SerialLookup | null>(null);
   const [query, setQuery] = useState("");
+  const [reload, setReload] = useState(0);
 
-  const load = () => {
+  useEffect(() => {
+    let cancelled = false;
     setResult(null);
-    fetchSerials(line.sku).then(setResult);
-  };
-  useEffect(load, [line.sku]);
+    fetchSerials(line.sku).then((r) => {
+      if (!cancelled) setResult(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [line.sku, reload]);
 
   if (!result) {
     return (
@@ -33,7 +39,7 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
         <s-banner tone="critical" heading="Can't reach Cin7">
           {`Serial numbers are unavailable right now (${result.code}).`}
         </s-banner>
-        <s-button onClick={load}>Retry</s-button>
+        <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
         <s-button onClick={onDone}>Back</s-button>
       </s-page>
     );

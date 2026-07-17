@@ -3,6 +3,7 @@ import {useEffect, useState} from "preact/hooks";
 import {LineList} from "./screens/LineList";
 import {SerialPicker} from "./screens/SerialPicker";
 import {SERIAL_PROPERTY_KEY, toCartLine, type CartLineLike} from "./lib/serials";
+import {assignSerial} from "./lib/assignSerial";
 
 type Screen = {name: "lines"} | {name: "picker"; lineUuid: string};
 
@@ -37,27 +38,15 @@ function Modal() {
           if (saving) return;
           setSaving(true);
           try {
-            if (line.quantity === 1) {
-              await shopify.cart.addLineItemProperties(line.uuid, {
-                [SERIAL_PROPERTY_KEY]: serial,
-              });
+            const outcome = await assignSerial(shopify.cart, line, serial, SERIAL_PROPERTY_KEY);
+            if (outcome.ok === true) {
+              shopify.toast.show(`Serial ${serial} assigned`);
+              setScreen({name: "lines"});
+            } else if (outcome.cartIntact) {
+              shopify.toast.show("Couldn't save the serial — try again");
             } else {
-              // Split: this unit gets the serial at add time (keeps lines distinct);
-              // the remainder stays serial-less for subsequent picks.
-              // `addLineItem` only takes (variantId, quantity) — it doesn't accept
-              // properties directly (cart-api.d.ts) — so the serial is attached via
-              // `addLineItemProperties` on the uuid it returns.
-              await shopify.cart.removeLineItem(line.uuid);
-              const newUuid = await shopify.cart.addLineItem(line.variantId, 1);
-              await shopify.cart.addLineItemProperties(newUuid, {
-                [SERIAL_PROPERTY_KEY]: serial,
-              });
-              await shopify.cart.addLineItem(line.variantId, line.quantity - 1);
+              shopify.toast.show("Couldn't save the serial — check item quantities in the cart");
             }
-            shopify.toast.show(`Serial ${serial} assigned`);
-            setScreen({name: "lines"});
-          } catch {
-            shopify.toast.show("Couldn't save the serial — try again");
           } finally {
             setSaving(false);
           }
