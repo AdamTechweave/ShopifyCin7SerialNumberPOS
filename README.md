@@ -12,7 +12,7 @@ is split so every unit gets its own line and its own serial. A Shopify Function 
 the Cart & Checkout Validation API is deployed alongside the POS extension to block
 checkout until every serialized line has exactly one unit, a serial, and no serial
 duplicated in the cart — see the **Known limitations** section below for the current
-verification status of that block on POS specifically.
+verification status of that block (all channels pending the spike).
 
 Full design: `docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md`.
 
@@ -251,14 +251,12 @@ done (from the design spec's acceptance criteria):
 
 ## 7. Known limitations
 
-- **POS hard-block is not yet verified.** Shopify does not document whether Cart &
+- **Hard-block verification pending (all channels).** Shopify does not document whether Cart &
   Checkout Validation Functions run on POS checkout at all — this is the single
   riskiest unknown in the project. `docs/superpowers/notes/2026-07-pos-validation-spike.md`
   tracks it; as of this writing its verdict is **PENDING HUMAN TEST** (deploy is
   done, but the online control test and the real-device POS test have not been
-  run/recorded yet). Until that spike lands with a **GO**, do not tell a client that
-  POS checkout is hard-blocked — only that the online storefront is, and that POS
-  enforcement today is the tile/modal UX (staff are strongly steered but not
+  run/recorded yet). Until that spike lands with a **GO**, do not tell a client that checkout is hard-blocked on ANY channel — the validation rules are unit-tested and deployed, but neither the online control test nor the POS device test has been recorded. POS enforcement today is the tile/modal UX (staff are strongly steered but not
   technically prevented from completing a POS sale without a serial). If the
   eventual verdict is **NO-GO**, that UX-only behavior becomes the permanent POS
   story and should be called out to the client explicitly.
