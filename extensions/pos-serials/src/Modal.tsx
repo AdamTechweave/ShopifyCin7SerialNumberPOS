@@ -1,5 +1,5 @@
 import {render} from "preact";
-import {useEffect, useState} from "preact/hooks";
+import {useEffect, useMemo, useState} from "preact/hooks";
 import {LineList} from "./screens/LineList";
 import {SerialPicker} from "./screens/SerialPicker";
 import {SERIAL_PROPERTY_KEY, toCartLine, type CartLineLike} from "./lib/serials";
@@ -20,10 +20,17 @@ function Modal() {
 
   // `cart.lineItems` is the raw POS `LineItem[]` (optional productId /
   // variantId / sku / title — see `toCartLine` in lib/serials.ts). Normalize
-  // on every render so both screens always see live, product-only lines.
-  const lines: CartLineLike[] = cart.lineItems
-    .map(toCartLine)
-    .filter((line): line is CartLineLike => line !== null);
+  // whenever the cart signal actually fires, not on every render — the `cart`
+  // prop object's reference must stay stable across unrelated re-renders
+  // (e.g. `saving`/`screen` state churn), or downstream effects keyed on it
+  // (like the camera scanner subscription) will spuriously re-run.
+  const cartForScreens = useMemo(() => {
+    const lines: CartLineLike[] = cart.lineItems
+      .map(toCartLine)
+      .filter((line): line is CartLineLike => line !== null);
+    return {lineItems: lines};
+  }, [cart]);
+  const lines = cartForScreens.lineItems;
 
   const line =
     screen.name === "picker" ? lines.find((l) => l.uuid === screen.lineUuid) : undefined;
@@ -32,7 +39,7 @@ function Modal() {
     return (
       <SerialPicker
         line={line}
-        cart={{lineItems: lines}}
+        cart={cartForScreens}
         onDone={() => setScreen({name: "lines"})}
         onChoose={async (serial) => {
           if (saving) return;
@@ -56,5 +63,5 @@ function Modal() {
   }
 
   // Also lands here if the picked line disappeared from the cart mid-flow.
-  return <LineList cart={{lineItems: lines}} onPick={(lineUuid) => setScreen({name: "picker", lineUuid})} />;
+  return <LineList cart={cartForScreens} onPick={(lineUuid) => setScreen({name: "picker", lineUuid})} />;
 }

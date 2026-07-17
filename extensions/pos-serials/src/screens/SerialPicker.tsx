@@ -22,9 +22,9 @@ type ScannerWithCamera = typeof shopify.scanner & {
   showCameraScanner(): void;
   hideCameraScanner(): void;
 };
-const scanner = shopify.scanner as ScannerWithCamera;
 
 export function SerialPicker({line, cart, onDone, onChoose}: Props) {
+  const scanner = shopify.scanner as ScannerWithCamera;
   const [result, setResult] = useState<SerialLookup | null>(null);
   const [query, setQuery] = useState("");
   const [reload, setReload] = useState(0);
@@ -52,11 +52,17 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
         shopify.toast.show(`${scan.data} is not in available stock`);
       }
     });
+    return unsubscribe;
+  }, [result, cart, line.uuid]);
+
+  // Camera scanner lifecycle is independent of the subscribe/unsubscribe
+  // effect above: only close it when the screen actually unmounts, not on
+  // every dep change of that effect (e.g. a fresh `result` after fetching).
+  useEffect(() => {
     return () => {
-      unsubscribe();
       scanner.hideCameraScanner();
     };
-  }, [result, cart, line.uuid]);
+  }, []);
 
   if (!result) {
     return (
