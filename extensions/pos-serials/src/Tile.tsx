@@ -1,7 +1,7 @@
 import {render} from "preact";
 import {useEffect, useState} from "preact/hooks";
 import type {CartLineLike} from "./lib/serials";
-import {unitsNeedingSerial} from "./lib/serials";
+import {unitsNeedingSerial, toCartLine} from "./lib/serials";
 import {fetchSerializedMap} from "./lib/api";
 
 export default async () => {
@@ -15,25 +15,10 @@ interface TileState {
 }
 
 // `shopify.cart.current.value.lineItems` entries have optional `productId` /
-// `variantId` / `sku` / `title` (custom sales have no product association),
-// while `CartLineLike` (shared with the serials lib) requires them. Only
-// lines tied to a real product can ever be serialized, so lines without a
-// `productId` are dropped here rather than widening `CartLineLike`.
+// `variantId` / `sku` / `title` (custom sales have no product association).
+// `toCartLine` (shared with Modal.tsx via `lib/serials.ts`) normalizes them
+// into `CartLineLike`, dropping lines without a `productId`.
 type PosCart = typeof shopify.cart.current.value;
-type PosLineItem = PosCart["lineItems"][number];
-
-function toCartLine(line: PosLineItem): CartLineLike | null {
-  if (line.productId === undefined) return null;
-  return {
-    uuid: line.uuid,
-    quantity: line.quantity,
-    productId: line.productId,
-    variantId: line.variantId ?? 0,
-    sku: line.sku ?? "",
-    title: line.title ?? "",
-    properties: line.properties,
-  };
-}
 
 function Tile() {
   const [state, setState] = useState<TileState>({needed: 0, hasSerialized: false, error: false});

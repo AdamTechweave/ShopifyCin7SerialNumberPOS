@@ -17,6 +17,38 @@ export interface AvailableSerial {
   isCurrentLocation: boolean;
 }
 
+// The real POS `LineItem` type (`@shopify/ui-extensions`) has OPTIONAL
+// `productId` / `variantId` / `sku` / `title` (custom sales have no product
+// association). `CartLineLike` requires them because only lines tied to a
+// real product can ever be serialized. This structural type only names the
+// fields the normalizer reads, so both `Tile.tsx` and `Modal.tsx` can pass
+// their (differently-aliased) POS line item objects straight through
+// without an extra cast.
+export interface RawPosLineItem {
+  uuid: string;
+  quantity: number;
+  productId?: number;
+  variantId?: number;
+  sku?: string;
+  title?: string;
+  properties: Record<string, string>;
+}
+
+// Shared by Tile.tsx and Modal.tsx: drops lines that aren't tied to a real
+// product (e.g. custom sales) rather than widening `CartLineLike`.
+export function toCartLine(line: RawPosLineItem): CartLineLike | null {
+  if (line.productId === undefined) return null;
+  return {
+    uuid: line.uuid,
+    quantity: line.quantity,
+    productId: line.productId,
+    variantId: line.variantId ?? 0,
+    sku: line.sku ?? "",
+    title: line.title ?? "",
+    properties: line.properties,
+  };
+}
+
 export function serializedLines<T extends CartLineLike>(
   lines: T[],
   serializedMap: Record<string, boolean>,
