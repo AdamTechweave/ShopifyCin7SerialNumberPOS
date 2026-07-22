@@ -1,0 +1,19 @@
+query CartValidationsGenerateRunInput {
+  cart {
+    lines {
+      quantity
+      serialNumber: attribute(key: "Serial Number") {
+        value
+      }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          product {
+            title
+            hasAnyTag(tags: ["serialized"])
+          }
+        }
+      }
+    }
+  }
+}
