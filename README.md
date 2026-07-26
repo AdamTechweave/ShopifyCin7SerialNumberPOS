@@ -109,7 +109,7 @@ extensions/
     src/lib/assignSerial.ts               # rollback-safe split + property write
     src/lib/api.ts                        # backend fetch helpers
 docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md   # design doc
-docs/superpowers/notes/2026-07-pos-validation-spike.md           # POS-block spike (verdict pending)
+docs/superpowers/notes/2026-07-pos-validation-spike.md           # POS-block spike (verdict: NO-GO)
 README.md                                 # this file
 ```
 
@@ -192,29 +192,41 @@ even after being edited or deleted) — this is expected CLI behavior, not a bug
 
 1. **Create the client's app** in the Techweave Partner org. Set distribution to
    **custom** (this is never a public/listed app). Install it on the client's store.
-2. **Create a Cin7 application key** for this client at
+2. **Host the backend and point `application_url` at it.** ⚠️ Easy to miss and it
+   breaks the extension silently. The POS extension calls its backend with
+   *relative* URLs (`/api/pos/serials`), which POS resolves against the app's
+   `application_url`. The repo ships the template placeholder
+   (`https://shopify.dev/apps/default-app-home`), so a deployed extension will
+   fetch from shopify.dev and every lookup fails — the tile renders but shows
+   "Check serials" and the picker can't load. Deploy the React Router server
+   (alongside the existing standalone allocation service is the intended home),
+   set `application_url` in `shopify.app.toml` to that HTTPS origin, and
+   `shopify app deploy` again. During local testing `shopify app dev` rewrites this
+   for you (`automatically_update_urls_on_dev = true`), which is why the dev session
+   must stay running while you test on a device.
+3. **Create a Cin7 application key** for this client at
    `inventory.dearsystems.com/ExternalAPI`, then fill in `.env` (or the hosting
    platform's env vars): `CIN7_ACCOUNT_ID`, `CIN7_APPLICATION_KEY`.
-3. **Build `CIN7_LOCATION_MAP`** covering every Shopify location that has a POS
+4. **Build `CIN7_LOCATION_MAP`** covering every Shopify location that has a POS
    register for this client, mapping each Shopify location ID to the exact Cin7
    Core location name.
-4. **If the client's serial tag isn't `serialized`**, change it in **two places**
+5. **If the client's serial tag isn't `serialized`**, change it in **two places**
    (both are required — the function's tag check does not read the env var):
    - `.env`: set `SERIAL_TAG=<their tag>` (used by the backend's tag lookup).
    - `extensions/serial-validation/src/cart_validations_generate_run.graphql`: edit
      the `hasAnyTag(tags: ["serialized"])` literal to the client's tag.
-5. **Tag serialized products** in the client's Shopify catalog with that tag, and
+6. **Tag serialized products** in the client's Shopify catalog with that tag, and
    confirm each serialized product's SKU matches its Cin7 Core SKU **exactly**
    (SKU mismatch is a hard failure mode — see the design doc's error-handling
    table).
-6. **Deploy:**
+7. **Deploy:**
    ```bash
    npm run deploy    # shopify app deploy
    ```
    On this CLI version (`@shopify/cli` 4.5.1) the update flag is `--allow-updates`,
    not `--force` — `shopify app deploy` already applies it as needed; you shouldn't
    need to pass extra flags for a routine per-client deploy.
-7. **Do NOT activate the `serial-validation` checkout validation.** ⚠️ Tested
+8. **Do NOT activate the `serial-validation` checkout validation.** ⚠️ Tested
    2026-07-22 (`docs/superpowers/notes/2026-07-pos-validation-spike.md`, verdict
    **NO-GO**): validation functions **do not run on Shopify POS checkout**, and
    they **do** block the online store — the exact inverse of what's wanted.
@@ -234,7 +246,7 @@ even after being edited or deleted) — this is expected CLI behavior, not a bug
    ```
 
    Then confirm **Settings → Checkout → Checkout Rules** no longer lists it.
-8. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed. Add the
+9. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed. Add the
    "Serial numbers" tile to the smart grid on each register (POS app → smart grid
    layout → add tile).
 
