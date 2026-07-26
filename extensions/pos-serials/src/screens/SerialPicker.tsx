@@ -9,22 +9,8 @@ interface Props {
   onChoose: (serial: string) => Promise<void>;
 }
 
-// `showCameraScanner`/`hideCameraScanner` are part of the POS Scanner API at
-// api_version 2026-07 (this extension's declared version — see
-// shopify.extension.toml), but the installed @shopify/ui-extensions types are
-// pinned to 2025.10.x (see package.json) and predate them: compare
-// node_modules/@shopify/ui-extensions/build/ts/surfaces/point-of-sale/api/scanner-api/scanner-api.d.ts
-// (only `scannerData` and `sources`) against the 2026.7.x release, which adds
-// both methods to `ScannerApiContent`. Cast locally until the dependency is
-// bumped to a version whose types include them; `scannerData`/`sources` are
-// unaffected and used as typed.
-type ScannerWithCamera = typeof shopify.scanner & {
-  showCameraScanner(): void;
-  hideCameraScanner(): void;
-};
-
 export function SerialPicker({line, cart, onDone, onChoose}: Props) {
-  const scanner = shopify.scanner as ScannerWithCamera;
+  const scanner = shopify.scanner;
   const [result, setResult] = useState<SerialLookup | null>(null);
   const [query, setQuery] = useState("");
   const [reload, setReload] = useState(0);
