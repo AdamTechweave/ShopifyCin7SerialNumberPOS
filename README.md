@@ -246,9 +246,20 @@ even after being edited or deleted) — this is expected CLI behavior, not a bug
    ```
 
    Then confirm **Settings → Checkout → Checkout Rules** no longer lists it.
-9. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed. Add the
-   "Serial numbers" tile to the smart grid on each register (POS app → smart grid
-   layout → add tile).
+9. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed.
+   **Add the tile from the Shopify admin, not from the POS app** — verified
+   2026-07-26: the in-app "+ Add tile → Apps" list did not offer the extension,
+   but adding it via the admin's POS smart-grid configurator (Settings → Point of
+   Sale → smart grid / POS app management) worked, after which it appeared on the
+   device. Try the admin route first to save time.
+
+   Also note `extensions/pos-serials/shopify.extension.toml` targets
+   `api_version = "2026-04"` — shopify.dev's documented stable version for POS UI
+   — deliberately, not the newest available. A POS app that predates the declared
+   version filters the extension out of the tile list silently, with no error
+   anywhere; if a client's registers are on older POS builds and the tile never
+   appears, step the api_version down (and match `@shopify/ui-extensions` to it)
+   before hunting elsewhere.
 
 ## 6. Acceptance checklist
 
