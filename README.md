@@ -8,11 +8,13 @@ serial. Tapping the tile opens a modal that looks up available serial numbers fr
 Cin7 Core by SKU across all warehouse locations (current store first); staff pick one
 by tapping, searching, or scanning the unit's barcode, and it is saved as a
 `Serial Number` line item property on that cart line. A quantity > 1 serialized line
-is split so every unit gets its own line and its own serial. A Shopify Function on
-the Cart & Checkout Validation API is deployed alongside the POS extension to block
-checkout until every serialized line has exactly one unit, a serial, and no serial
-duplicated in the cart — see the **Known limitations** section below for the current
-verification status of that block (all channels pending the spike).
+is split so every unit gets its own line and its own serial.
+
+**Enforcement is prompt-only on POS.** Testing settled this on 2026-07-22: Shopify
+cannot hard-block a POS sale (validation functions don't run on POS checkout), and
+the client does not want online checkout blocked — online orders get serials at pick
+time in Cin7. The tile's count and the picker are what drive compliance; the shipped
+`serial-validation` function stays deactivated. See **Known limitations**.
 
 Full design: `docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md`.
 
@@ -29,11 +31,10 @@ tap, by typing into the search box, or by scanning the unit's barcode with the
 device camera (an exact match auto-selects; a non-matching scan is rejected with an
 explanatory message). If the line's quantity is greater than 1, selecting a serial
 splits off a quantity-1 sibling line so each unit ends up on its own line with its
-own serial. A Cart & Checkout Validation Function (`serial-validation`) enforces
-server-side that every serialized line has quantity 1, a non-empty serial, and no
-serial repeated in the cart — live blocking behavior (online and POS channels) is
-verified during the spike tracked below (see docs/superpowers/notes/2026-07-pos-validation-spike.md,
-verdict pending).
+own serial. Nothing prevents completing the sale if a serial is still missing —
+staff are prompted, not gated (see **Known limitations** for why, and
+`docs/superpowers/notes/2026-07-pos-validation-spike.md` for the test that settled
+it).
 
 ## 2. Architecture
 
@@ -49,13 +50,13 @@ Four parts, one app per client:
    out serials already used elsewhere in the cart, supports search and barcode
    scan, and performs the qty-1 split + property write on selection).
 3. **Checkout validation function** (Shopify Function, Cart & Checkout Validation
-   API, handle `serial-validation`). Runs on Shopify's servers with no dependency on
-   the app backend. Its logic blocks checkout unless every line whose product
-   carries the serial tag has quantity 1, a non-empty `Serial Number` attribute, and
-   a cart-unique serial — the unit-tested rules are embedded; live blocking behavior
-   across channels is verified during the spike (see **Known limitations**). The tag
-   literal is baked into the function's GraphQL input query at deploy time (see the
-   per-client rollout checklist below for what to edit if a client's tag differs
+   API, handle `serial-validation`) — **built and deployed but deliberately never
+   activated.** Its rules (serialized line ⇒ quantity 1, non-empty `Serial Number`
+   attribute, cart-unique serial) are unit-tested and would block checkout if
+   enabled, but testing proved they only apply to online/web checkout, never POS —
+   the inverse of this client's requirement. Retained solely in case Shopify extends
+   validation functions to POS later. The tag literal is baked into the function's
+   GraphQL input query at deploy time (see rollout notes if a client's tag differs
    from `serialized`).
 4. **App backend** (React Router / Node, the Shopify app template server).
    Authenticates POS extension requests via `authenticate.public.checkout`
@@ -213,27 +214,26 @@ even after being edited or deleted) — this is expected CLI behavior, not a bug
    On this CLI version (`@shopify/cli` 4.5.1) the update flag is `--allow-updates`,
    not `--force` — `shopify app deploy` already applies it as needed; you shouldn't
    need to pass extra flags for a routine per-client deploy.
-7. **Activate the validation.** While `shopify app dev` is running, open its
-   GraphiQL (dev console link in the CLI output) against the client's store and run
-   this mutation exactly as written:
+7. **Do NOT activate the `serial-validation` checkout validation.** ⚠️ Tested
+   2026-07-22 (`docs/superpowers/notes/2026-07-pos-validation-spike.md`, verdict
+   **NO-GO**): validation functions **do not run on Shopify POS checkout**, and
+   they **do** block the online store — the exact inverse of what's wanted.
+   Activating it on a client store would break online checkout for every
+   serialized product (blocked at add-to-cart) while still letting POS sales
+   complete without serials. There is deliberately **no activation step** in this
+   runbook. If a validation was activated on a store by mistake, remove it:
 
    ```graphql
-   mutation {
-     validationCreate(validation: {
-       functionHandle: "serial-validation"
-       enable: true
-       blockOnFailure: true
-       title: "Serial numbers required"
-     }) {
-       validation { id enabled blockOnFailure }
-       userErrors { field message }
-     }
-   }
+   # 1. find it
+   query { validations(first: 10) { nodes { id title enabled } } }
+   # 2. delete the one titled "Serial numbers required"
+   mutation { validationDelete(id: "gid://shopify/Validation/REPLACE_ME") {
+     deletedId
+     userErrors { field message }
+   } }
    ```
 
-   Expect `userErrors: []`. Confirm in the client's Shopify admin under
-   **Settings → Checkout → Checkout Rules** that "Serial numbers required" shows as
-   active.
+   Then confirm **Settings → Checkout → Checkout Rules** no longer lists it.
 8. **Devices:** every register needs Shopify POS **≥ 10.6.0** installed. Add the
    "Serial numbers" tile to the smart grid on each register (POS app → smart grid
    layout → add tile).
@@ -252,30 +252,44 @@ done (from the design spec's acceptance criteria):
       non-matching scan shows an explanatory rejection, not a silent no-op.
 - [ ] Serials from other store locations appear in the picker, grouped below the
       current location's stock, and are selectable.
-- [ ] Attempting checkout with a missing/duplicate serial or quantity > 1 on a
-      serialized line is **blocked with the expected message** — *this step's
-      outcome across channels is the subject of the pending spike; see Known
-      limitations.* (Verdict pending — see docs/superpowers/notes/2026-07-pos-validation-spike.md)
+- [ ] A POS sale with a serialized line still missing its serial **can** be
+      completed — confirm staff understand the tile/modal is a prompt, not a
+      gate. (POS hard-blocking is not achievable; see Known limitations.)
 - [ ] With Cin7 unreachable (or credentials wrong), the picker shows a clear
-      "Can't reach Cin7" state with retry, and non-serialized items still sell
-      normally.
+      "Can't reach Cin7" state with retry, and all items — serialized or not —
+      still sell normally.
+- [ ] The completed order's line items each carry the `Serial Number` property
+      (check the order in Shopify admin), ready for the phase-2 Cin7 allocation
+      service.
 
 ## 7. Known limitations
 
-- **Hard-block verification pending (all channels).** Shopify does not document whether Cart &
-  Checkout Validation Functions run on POS checkout at all — this is the single
-  riskiest unknown in the project. `docs/superpowers/notes/2026-07-pos-validation-spike.md`
-  tracks it; as of this writing its verdict is **PENDING HUMAN TEST** (deploy is
-  done, but the online control test and the real-device POS test have not been
-  run/recorded yet). Until that spike lands with a **GO**, do not tell a client that checkout is hard-blocked on ANY channel — the validation rules are unit-tested and deployed, but neither the online control test nor the POS device test has been recorded. POS enforcement today is the tile/modal UX (staff are strongly steered but not
-  technically prevented from completing a POS sale without a serial). If the
-  eventual verdict is **NO-GO**, that UX-only behavior becomes the permanent POS
-  story and should be called out to the client explicitly.
-- **Cin7 outage blocks serialized checkout.** This is a deliberate trade-off, not a
-  bug: if Cin7 Core is unreachable or rate-limited, serialized lines cannot get a
-  verified serial, so those sales cannot complete (non-serialized items are
-  unaffected). A staff emergency override is a possible future addition, out of
-  scope for v1.
+- **POS enforcement is UX-only — a hard block is not possible.** Tested and
+  settled 2026-07-22 (`docs/superpowers/notes/2026-07-pos-validation-spike.md`,
+  verdict **NO-GO**): Cart & Checkout Validation Functions do not run on POS
+  checkout, and no other Shopify mechanism can prevent a POS sale from
+  completing (checkout UI extensions' `block_progress` / buyer-journey intercept
+  is web checkout only; POS UI extension targets cannot gate payment). Staff are
+  strongly steered — the tile shows an accurate "N serials needed" count and the
+  modal makes assignment fast — but a determined or rushed staff member can
+  complete a POS sale with serials missing. **Tell the client this explicitly:
+  they originally asked for a hard block.** Mitigation is operational (staff
+  training, plus catching gaps downstream in the Cin7 allocation flow), and the
+  `serialized`-tag + `Serial Number` property data model means a missed serial is
+  detectable after the fact rather than silent.
+- **The `serial-validation` function ships but is never activated.** It is
+  retained in the repo (`extensions/serial-validation/`, unit-tested) only in
+  case Shopify later extends validation functions to POS. Activating it today
+  would block **online** checkout — which this client explicitly does not want,
+  since online orders get serials assigned at pick time in Cin7 — while doing
+  nothing for POS. See rollout step 7 for how to remove it if activated by
+  mistake.
+- **Cin7 outage does not stop sales.** If Cin7 Core is unreachable or
+  rate-limited, the picker shows "Can't reach Cin7" and staff cannot assign a
+  verified serial, but the sale can still be completed (see the POS enforcement
+  limitation above) — the serial simply has to be reconciled afterwards. This is
+  a change from the original design intent, which assumed a hard block was
+  available.
 - **45-second staleness window.** Cin7 availability responses are cached per SKU
   for 45 seconds (`app/services/serials.server.ts`) to respect Cin7's ~60
   calls/minute rate limit. Two registers selling the last unit of a SKU within that

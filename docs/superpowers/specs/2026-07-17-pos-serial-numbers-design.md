@@ -41,12 +41,19 @@ Checkout is blocked until every serialized line has a serial.
    (default key `Serial Number`, configurable).
 6. **One serial per unit.** A serialized line with quantity > 1 is split so each
    unit is its own quantity-1 line with its own serial.
-7. **Checkout is hard-blocked** (server-side, unbypassable) until every serialized
-   line has quantity 1, a serial property, and no serial appears twice in the cart.
-   *Caveat:* Shopify does not document validation functions running on POS
-   checkout; an early spike verifies this empirically. Fallback if unsupported:
-   soft enforcement on POS (tile badge + warnings), hard block retained for online
-   channels.
+7. ~~**Checkout is hard-blocked**~~ — **SUPERSEDED 2026-07-22 by spike result +
+   client clarification.** Enforcement on POS is **prompt-only**: the tile's
+   "N serials needed" count and the picker drive compliance; nothing prevents
+   completing a POS sale with a serial missing.
+   Two findings forced this:
+   (a) Cart & checkout validation functions **do not run on POS checkout** (tested:
+   online blocked, POS cash sale completed with the same validation active), and no
+   other Shopify mechanism can gate a POS payment.
+   (b) The client does **not** want online checkout blocked — online orders get
+   serials assigned at pick time in Cin7; only POS needs enforcement because that's
+   where the unit is physically handed over.
+   The validation function therefore ships deactivated. See
+   `docs/superpowers/notes/2026-07-pos-validation-spike.md`.
 8. Serials already assigned to another line in the current cart are excluded from
    the picker.
 

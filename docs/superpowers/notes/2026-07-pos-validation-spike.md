@@ -1,12 +1,32 @@
 # SPIKE — Does the `serial-validation` function block POS checkout?
 
-## VERDICT: PENDING HUMAN TEST
+## VERDICT: **NO-GO** (tested 2026-07-22)
 
-This is the riskiest unknown in the project. Shopify does not document validation
-functions running on POS checkout. Steps 1–3 below (deploy, test product,
-activation) needed to happen before the online control test and the POS test —
-this worksheet exists so the human only has to do the parts that require a
-Partner login, a dev store, and a physical/simulated POS device.
+**Cart & checkout validation functions do not run on Shopify POS checkout.**
+Same store, same active validation: online checkout was blocked (Step 4), and a
+POS cash sale of the same untagged-serial product completed with no block, no
+message, nothing (Step 5). The POS UI extension was not installed on the device
+during this test, which does not affect the result — validation functions
+execute server-side from cart line properties and product tags, independently
+of any UI extension.
+
+**Compounding requirement change (from the client, same session):** online
+checkout must NOT be blocked at all. Online orders get their serials assigned
+at pick time in Cin7; only POS needs enforcement, because that is where the
+physical unit is handed to the customer.
+
+**Consequence:** the validation function blocks only the channel the client
+wants left alone, and cannot block the channel they care about. It has no
+remaining use for this client and **must never be activated on a client
+store.** POS enforcement is the tile + modal UX (badge count, "N serials
+needed", picker) — a hard block is not achievable on POS with any current
+Shopify mechanism (checkout UI extensions' `block_progress` / buyer-journey
+intercept is web checkout only; POS UI extension targets cannot prevent
+payment).
+
+This was the riskiest unknown in the project — Shopify does not document whether
+validation functions run on POS checkout. It is now settled by direct test. The
+record of how it was tested is preserved below.
 
 ---
 
@@ -47,13 +67,13 @@ a dev store to create a product in, and a POS app on a device or simulator.
 - [x] **Step 1: Deploy** — done by the agent. Demo config removed, version
   `cin7serialproducts-2` released (see Section 1 above).
 
-- [ ] **Step 2: Prepare a test product** **[HUMAN or via GraphiQL]**
+- [x] **Step 2: Prepare a test product** **[HUMAN or via GraphiQL]**
 
   On the dev store: create product "Spike Serial Test", any price, tag
   `serialized`, tracked SKU optional (not needed for this spike). Make it
   available to the POS sales channel.
 
-- [ ] **Step 3: Activate the validation**
+- [x] **Step 3: Activate the validation** — done; validation created and confirmed active (online block in Step 4 proves it)
 
   Start `shopify app dev`, open its GraphiQL (dev console → GraphiQL), and run
   this mutation exactly as written:
@@ -78,34 +98,48 @@ a dev store to create a product in, and a POS app on a device or simulator.
   - Record here: `userErrors` returned = ____________________
   - Record here: Checkout Rules shows it active? Y / N
 
-- [ ] **Step 4: Verify online blocking (control test)**
+- [x] **Step 4: Verify online blocking (control test)**
 
   On the dev store's online storefront, add "Spike Serial Test" to the cart
   and attempt checkout.
   Expected: checkout blocked with "Select a serial number for Spike Serial
   Test…". This proves the function itself works.
-  - Record here: what actually happened = ____________________
+  - Record here: what actually happened = **BLOCKED at add-to-cart with
+    "Select a serial number for Spike Serial Test (tap the Serial numbers
+    tile)." (2026-07-22, dev store). Function confirmed working online.**
+  - **⚠️ REQUIREMENT CHANGE surfaced by this test:** the client does NOT want
+    online checkout blocked — online orders get serials assigned at pick time
+    in Cin7. Enforcement must apply to POS only (product handed over at point
+    of sale). A channel-scoping fix was considered (POS extension stamps a
+    cart-level marker; the function enforces only when the marker is present,
+    since the function input exposes no native channel/source field) — but
+    Step 5 made it moot: with POS unenforceable, scoping the function to POS
+    would leave it doing nothing at all. The validation stays deactivated.
 
-- [ ] **Step 5: Verify POS blocking (the actual spike)**
+- [x] **Step 5: Verify POS blocking (the actual spike)**
   **[HUMAN — needs POS app on device/simulator logged into the dev store]**
 
   In Shopify POS: add "Spike Serial Test" to the cart, tap Checkout/Pay,
   attempt to complete the sale (use a cash payment).
   Record exactly what happens: blocked with our message / blocked silently /
   sale completes.
-  - Record here: what actually happened = ____________________
+  - Record here: what actually happened = **SALE COMPLETED. No validation
+    fired, no message, no block** (2026-07-22, dev store, validation active
+    and confirmed working online in Step 4). Cart & checkout validation
+    functions do NOT run on Shopify POS checkout.
 
-- [ ] **Step 6: Write the verdict**
+- [x] **Step 6: Write the verdict** — NO-GO, recorded at the top of this file
 
   Fill in the results table below and set the VERDICT header at the top of
   this file to one of:
   - **GO**: POS blocked → hard-block requirement fully met.
-  - **NO-GO**: POS not blocked → POS enforcement is tile/modal UX only; the
-    function stays for online channels. **Report this to the user
-    immediately** — the client chose hard-block deliberately. NO-GO does not
-    stop the plan.
+  - **NO-GO**: POS not blocked → POS enforcement is tile/modal UX only.
+    (Original wording said "the function stays for online channels" — void:
+    the client does not want online blocked either, so the function is left
+    deactivated entirely.) **Report to the user immediately** — the client
+    chose hard-block deliberately. NO-GO does not stop the plan.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
   ```bash
   git add docs/superpowers/notes
@@ -116,9 +150,18 @@ a dev store to create a product in, and a POS app on a device or simulator.
 
 ## 3. Results table
 
-| Date | POS app version | Dev store | Online result | POS result | Verdict | Notes |
-|------|-----------------|-----------|----------------|-------------|---------|-------|
-|      |                 |           |                |             |         |       |
+| Date | Dev store | Online result | POS result | Verdict |
+|---|---|---|---|---|
+| 2026-07-22 | Techweave dev store | **Blocked** at add-to-cart: "Select a serial number for Spike Serial Test (tap the Serial numbers tile)." | **Sale completed** — no block, no message | **NO-GO** |
+
+Notes: POS UI extension tile was not installed on the device during the POS test.
+This does not invalidate the result — validation functions run server-side from
+cart line properties and product tags, with no dependency on any UI extension, and
+the same validation demonstrably fired online moments earlier.
+
+Follow-up actions taken: validation must never be activated on a client store
+(README rollout step 7 rewritten as a warning + removal mutation); spec
+requirement 7 marked superseded; POS enforcement is prompt-only.
 
 Screenshots (if available), file paths or links:
 - Online checkout block screenshot: ____________________
