@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "8e72081fdb833e699b901d79864fca91"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://injection-sandwich-consideration-parks.trycloudflare.com"
 embedded = true
 name = "Cin7SerialProducts"
 
@@ -21,7 +21,7 @@ api_version = "2026-10"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ "https://injection-sandwich-consideration-parks.trycloudflare.com/auth/callback", "https://injection-sandwich-consideration-parks.trycloudflare.com/auth/shopify/callback", "https://injection-sandwich-consideration-parks.trycloudflare.com/api/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true

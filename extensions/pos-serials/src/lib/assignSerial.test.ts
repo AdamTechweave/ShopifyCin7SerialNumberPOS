@@ -96,7 +96,7 @@ describe("assignSerial — quantity > 1 (split)", () => {
       {
         op: "addLineItemProperties",
         uuid: "original-uuid",
-        properties: {[SPLIT_MARKER_KEY]: "1"},
+        properties: {[SPLIT_MARKER_KEY]: "in progress"},
       },
       // 2. wait until the marker is actually visible — without this the add merges
       {op: "waitForProperty", uuid: "original-uuid", key: SPLIT_MARKER_KEY},
@@ -133,7 +133,7 @@ describe("assignSerial — quantity > 1 (split)", () => {
 
     expect(outcome).toMatchObject({ok: false, cartIntact: true});
     expect(calls).toEqual([
-      {op: "addLineItemProperties", uuid: "original-uuid", properties: {[SPLIT_MARKER_KEY]: "1"}},
+      {op: "addLineItemProperties", uuid: "original-uuid", properties: {[SPLIT_MARKER_KEY]: "in progress"}},
       {op: "waitForProperty", uuid: "original-uuid", key: SPLIT_MARKER_KEY},
       {op: "addLineItem", variantId: 42, quantity: 1},
       {op: "removeLineItemProperties", uuid: "original-uuid", keys: [SPLIT_MARKER_KEY]},

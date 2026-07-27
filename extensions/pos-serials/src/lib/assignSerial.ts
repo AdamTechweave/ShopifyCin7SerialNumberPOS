@@ -28,11 +28,19 @@ export type AssignOutcome =
 
 /**
  * Marks the line being split so POS won't merge a freshly added plain line into
- * it. Underscore-prefixed so Shopify hides it from order and receipt display; it
- * exists only between the first and last step of a split and is removed with the
- * original line on success.
+ * it.
+ *
+ * Deliberately NOT underscore-prefixed. An underscore-prefixed key is hidden
+ * from order/receipt display, which was the original choice — but device traces
+ * (2026-07-26) proved POS ignores hidden properties when deciding whether to
+ * merge: the marker was confirmed visible in cart state and the add still merged
+ * into the marked line. The same traces show an add does NOT merge into a line
+ * carrying a visible property. So the marker has to be visible to do its job.
+ *
+ * It exists only between the first and last step of a split and disappears with
+ * the original line on success, so staff see it briefly at most.
  */
-export const SPLIT_MARKER_KEY = "_serialSplitPending";
+export const SPLIT_MARKER_KEY = "Serial assignment";
 
 /**
  * Assigns a serial to a cart line, splitting qty>1 lines so the serialized unit
@@ -101,7 +109,7 @@ export async function assignSerial(
   };
 
   try {
-    await cart.addLineItemProperties(line.uuid, {[SPLIT_MARKER_KEY]: "1"});
+    await cart.addLineItemProperties(line.uuid, {[SPLIT_MARKER_KEY]: "in progress"});
     marked = true;
 
     // Without this the add below merges into the original line.
