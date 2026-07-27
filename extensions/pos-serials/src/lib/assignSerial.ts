@@ -3,6 +3,11 @@ export interface CartOps {
   addLineItemProperties(uuid: string, properties: Record<string, string>): Promise<void>;
   removeLineItemProperties(uuid: string, keys: string[]): Promise<void>;
   removeLineItem(uuid: string): Promise<void>;
+  /**
+   * Resolves true once the given line is observed carrying `key` in cart state,
+   * false if it doesn't become visible in time.
+   */
+  waitForProperty(uuid: string, key: string): Promise<boolean>;
 }
 
 export interface SplitLine {
@@ -11,13 +16,21 @@ export interface SplitLine {
   quantity: number;
 }
 
-export type AssignOutcome = {ok: true} | {ok: false; cartIntact: boolean};
+export type AssignFailure =
+  | "PROPERTY_WRITE_FAILED"
+  | "MARKER_NOT_VISIBLE"
+  | "LINE_MERGED"
+  | "ADD_DISMISSED";
+
+export type AssignOutcome =
+  | {ok: true}
+  | {ok: false; reason: AssignFailure; cartIntact: boolean};
 
 /**
- * Marks the line being split so POS can't merge a freshly added plain line back
- * into it. Underscore-prefixed so Shopify hides it from order/receipt display;
- * it only exists between the first and last step of a split and is removed with
- * the original line on success.
+ * Marks the line being split so POS won't merge a freshly added plain line into
+ * it. Underscore-prefixed so Shopify hides it from order and receipt display; it
+ * exists only between the first and last step of a split and is removed with the
+ * original line on success.
  */
 export const SPLIT_MARKER_KEY = "_serialSplitPending";
 
@@ -25,17 +38,23 @@ export const SPLIT_MARKER_KEY = "_serialSplitPending";
  * Assigns a serial to a cart line, splitting qty>1 lines so the serialized unit
  * is its own qty-1 line.
  *
- * The POS Cart API has no `properties` argument on `addLineItem` and no quantity
- * setter, and POS merges same-variant lines that carry identical properties. A
- * naive "add 1, then tag it" therefore merges the new unit straight back into
- * the original line, and removing the original then deletes the serialized unit
- * along with it (observed on device 2026-07-26: a qty-2 line collapsed to a
- * single untagged qty-1 line). To avoid that, the original is marked first so it
- * can no longer absorb a plain add.
+ * Why this is more than "add a line and tag it" — all observed on device
+ * 2026-07-26 (see docs/superpowers/notes/2026-07-pos-cart-merge.md):
  *
- * Ordering keeps the never-lose-units invariant: everything is built while the
- * original is still present, and the original is removed last. Any failure
- * leaves the cart over-counted (obvious to staff) rather than short.
+ *  - The Cart API has no `properties` argument on `addLineItem` and no quantity
+ *    setter, so a split has to be built from add/remove calls.
+ *  - POS merges a newly added line into an existing same-variant line when both
+ *    carry the same properties, and `addLineItem` then returns the EXISTING
+ *    line's uuid rather than a new one.
+ *  - A resolved `addLineItemProperties` does NOT mean the property is visible in
+ *    cart state yet, and the merge decision reads that state — so tagging the
+ *    original and immediately adding still merged.
+ *
+ * Hence: tag the original, wait until the tag is actually visible, then add. Both
+ * adds are checked against the uuids we already know, so an unexpected merge is
+ * reported instead of silently destroying units. The original is removed last,
+ * so any failure leaves the cart over-counted (visible to staff) rather than
+ * short.
  */
 export async function assignSerial(
   cart: CartOps,
@@ -48,7 +67,7 @@ export async function assignSerial(
       await cart.addLineItemProperties(line.uuid, {[propertyKey]: serial});
       return {ok: true};
     } catch {
-      return {ok: false, cartIntact: true};
+      return {ok: false, reason: "PROPERTY_WRITE_FAILED", cartIntact: true};
     }
   }
 
@@ -59,7 +78,7 @@ export async function assignSerial(
   const rollback = async (): Promise<boolean> => {
     let cartIntact = true;
     for (const uuid of [serializedUuid, remainderUuid]) {
-      if (!uuid) continue;
+      if (!uuid || uuid === line.uuid) continue;
       try {
         await cart.removeLineItem(uuid);
       } catch {
@@ -76,21 +95,42 @@ export async function assignSerial(
     return cartIntact;
   };
 
+  const fail = async (reason: AssignFailure, cartIntact = true): Promise<AssignOutcome> => {
+    const rolledBackClean = await rollback();
+    return {ok: false, reason, cartIntact: cartIntact && rolledBackClean};
+  };
+
   try {
     await cart.addLineItemProperties(line.uuid, {[SPLIT_MARKER_KEY]: "1"});
     marked = true;
 
+    // Without this the add below merges into the original line.
+    if (!(await cart.waitForProperty(line.uuid, SPLIT_MARKER_KEY))) {
+      return await fail("MARKER_NOT_VISIBLE");
+    }
+
     serializedUuid = await cart.addLineItem(line.variantId, 1);
-    if (!serializedUuid) return {ok: false, cartIntact: await rollback()};
+    if (!serializedUuid) return await fail("ADD_DISMISSED");
+    if (serializedUuid === line.uuid) {
+      // Merged anyway: the original absorbed the unit, so the cart is now one
+      // unit over. Never tag or remove it — that's what destroyed units before.
+      serializedUuid = "";
+      return await fail("LINE_MERGED", false);
+    }
+
     await cart.addLineItemProperties(serializedUuid, {[propertyKey]: serial});
 
     remainderUuid = await cart.addLineItem(line.variantId, line.quantity - 1);
-    if (!remainderUuid) return {ok: false, cartIntact: await rollback()};
+    if (!remainderUuid) return await fail("ADD_DISMISSED");
+    if (remainderUuid === line.uuid || remainderUuid === serializedUuid) {
+      remainderUuid = "";
+      return await fail("LINE_MERGED", false);
+    }
 
     // Removing the original also discards its marker.
     await cart.removeLineItem(line.uuid);
     return {ok: true};
   } catch {
-    return {ok: false, cartIntact: await rollback()};
+    return await fail("PROPERTY_WRITE_FAILED");
   }
 }

@@ -4,6 +4,8 @@ import {LineList} from "./screens/LineList";
 import {SerialPicker} from "./screens/SerialPicker";
 import {SERIAL_PROPERTY_KEY, toCartLine, type CartLineLike} from "./lib/serials";
 import {assignSerial} from "./lib/assignSerial";
+import {traceCart} from "./lib/traceCart";
+import {createCartOps} from "./lib/cartOps";
 
 type Screen = {name: "lines"} | {name: "picker"; lineUuid: string};
 
@@ -44,15 +46,26 @@ function Modal() {
         onChoose={async (serial) => {
           if (saving) return;
           setSaving(true);
+          // TEMPORARY: traced cart ops so on-device merge behaviour lands in the
+          // dev server log. Revert to passing `shopify.cart` directly once the
+          // split behaviour is settled.
+          const traced = traceCart(createCartOps());
           try {
-            const outcome = await assignSerial(shopify.cart, line, serial, SERIAL_PROPERTY_KEY);
+            const outcome = await assignSerial(traced.ops, line, serial, SERIAL_PROPERTY_KEY);
+            traced.flush({
+              serial,
+              pickedLine: {uuid: line.uuid, variantId: line.variantId, quantity: line.quantity},
+              outcome,
+            });
             if (outcome.ok === true) {
               shopify.toast.show(`Serial ${serial} assigned`);
               setScreen({name: "lines"});
-            } else if (outcome.cartIntact) {
-              shopify.toast.show("Couldn't save the serial — try again");
+            } else if (!outcome.cartIntact) {
+              shopify.toast.show("Serial not saved — check item quantities in the cart");
+            } else if (outcome.reason === "LINE_MERGED") {
+              shopify.toast.show("POS merged the line — set quantity to 1 and try again");
             } else {
-              shopify.toast.show("Couldn't save the serial — check item quantities in the cart");
+              shopify.toast.show("Couldn't save the serial — try again");
             }
           } finally {
             setSaving(false);
