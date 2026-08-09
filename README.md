@@ -108,15 +108,19 @@ extensions/
     src/lib/serials.ts                    # pure cart/serial logic
     src/lib/assignSerial.ts               # rollback-safe split + property write
     src/lib/api.ts                        # backend fetch helpers
+    src/lib/cartOps.ts                    # real POS cart ops + property-visibility wait
 docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md   # design doc
 docs/superpowers/notes/2026-07-pos-validation-spike.md           # POS-block spike (verdict: NO-GO)
+docs/superpowers/notes/2026-07-pos-cart-merge.md                 # undocumented POS line-merge rules
 README.md                                 # this file
 ```
 
 ## 3. Environment variables
 
-All four live in `.env.example`; copy it to `.env` and fill in per client. None have
-a merchant-facing settings UI in v1 — Techweave manages them per deployment.
+Copy `.env.example` to `.env` (local) or set them in the host's environment
+(production). None have a merchant-facing settings UI in v1 — Techweave manages
+them per deployment. The Cin7 and tag variables are listed below; the database and
+Shopify variables are covered in **Production deployment**.
 
 | Variable | Description | Where to get it |
 |---|---|---|
@@ -336,3 +340,66 @@ done (from the design spec's acceptance criteria):
   recommended before this becomes a maintenance burden.
 - **No merchant-facing settings UI.** All per-client configuration is env vars,
   managed by Techweave — see the per-client rollout checklist above.
+
+## 8. Production deployment (Vercel + Supabase)
+
+The backend is developer-hosted — Shopify does not host app servers. Their
+[hosting matrix](https://shopify.dev/docs/apps/build/app-surfaces) puts POS UI
+extensions and Functions on Shopify's infrastructure but leaves "server-only"
+components to you, and notes that an app still needs a developer-hosted backend
+"to handle tasks like calling third-party APIs" — exactly our Cin7 case. A
+backend is unavoidable here regardless: the Cin7 credentials must never reach the
+extension bundle, which is readable on the device.
+
+This app deploys to **Vercel**, alongside the existing Cin7 allocation service,
+with **Supabase Postgres** for session storage.
+
+### One-time setup
+
+1. **Supabase**: create (or reuse) a project. From Project Settings → Database,
+   take both connection strings:
+   - Transaction pooler, port **6543** → `DATABASE_URL`, with
+     `?pgbouncer=true&connection_limit=1` appended. Serverless opens a connection
+     per invocation; the direct port will exhaust Postgres connections.
+   - Direct, port **5432** → `DIRECT_URL`. Migrations cannot run through
+     pgbouncer.
+2. **Vercel**: import the repo. Set every variable from `.env.example` in Project
+   Settings → Environment Variables (`CIN7_*`, `SERIAL_TAG`, `CIN7_LOCATION_MAP`,
+   `DATABASE_URL`, `DIRECT_URL`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`,
+   `SHOPIFY_APP_URL`, `SCOPES`). Vercel runs the `vercel-build` script, which
+   generates the Prisma client and applies migrations before building.
+3. **Point the app at the deployment.** Set `application_url` and the
+   `redirect_urls` in `shopify.app.toml` to the production Vercel URL, set
+   `SHOPIFY_APP_URL` to the same value, then `shopify app deploy`.
+
+   ⚠️ `application_url` and `SHOPIFY_APP_URL` must match. The POS extension calls
+   its backend with **relative** URLs, which POS resolves against
+   `application_url`; if it points anywhere else, every lookup fails and the tile
+   sits on "Check serials" with no other clue.
+4. **Verify** before handing to staff:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" \
+     -A "Mozilla/5.0" "https://<your-app>.vercel.app/api/pos/serials?sku=X&locationId=1"
+   ```
+   Expect **401** — reachable and correctly demanding a POS session token. A 404
+   means the deploy didn't take; a 500 usually means missing env vars.
+
+### Serverless caveat: the Cin7 cache
+
+`SerialService` caches Cin7 availability in process (45s per SKU, plus a 10-minute
+SKU-existence cache). On Vercel each invocation may land on a fresh isolate, so
+the cache hits far less often than on a long-running server and more requests
+reach Cin7.
+
+This is acceptable at POS volume rather than something to engineer around: Cin7
+allows **60 calls/minute per application key**, and the app only calls Cin7 when a
+staff member opens the serial picker for a line — roughly one call per
+assignment. Sustained picker opens across all registers would have to exceed one
+per second to approach the limit. Throttling is also handled rather than
+crashing: 429 and 503 both map to `RATE_LIMITED` and the picker shows "Can't
+reach Cin7" with a Retry button.
+
+If a client's volume ever does approach it, the fix is to move the cache behind a
+shared store (Vercel KV / Upstash Redis) — `app/services/cache.server.ts` is a
+single small class behind one interface, so only that file changes.
+

@@ -9,8 +9,13 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  // Pooled connection (Supabase pgbouncer, port 6543). Serverless functions open
+  // a connection per invocation, so the pooler is required — the direct port
+  // will exhaust Postgres connections under load.
+  url       = env("DATABASE_URL")
+  // Direct connection (port 5432). Migrations can't run through pgbouncer.
+  directUrl = env("DIRECT_URL")
 }
 
 model Session {
