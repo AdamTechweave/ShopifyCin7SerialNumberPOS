@@ -1,27 +1,37 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "8e72081fdb833e699b901d79864fca91"
-application_url = "https://REPLACE-WITH-PRODUCTION-URL.vercel.app"
-embedded = true
 name = "Cin7SerialProducts"
+application_url = "https://shopify-cin7-serial-number-pos.vercel.app"
+embedded = false
 
-[access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products"
+[build]
+automatically_update_urls_on_dev = false
 
 [webhooks]
 api_version = "2026-10"
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
+  uri = "https://shopify-cin7-serial-number-pos.vercel.app/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
+  uri = "https://shopify-cin7-serial-number-pos.vercel.app/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
-[auth]
-redirect_urls = [ "https://REPLACE-WITH-PRODUCTION-URL.vercel.app/auth/callback", "https://REPLACE-WITH-PRODUCTION-URL.vercel.app/auth/shopify/callback", "https://REPLACE-WITH-PRODUCTION-URL.vercel.app/api/auth/callback" ]
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-[build]
-automatically_update_urls_on_dev = false
+[auth]
+redirect_urls = [
+  "https://shopify.dev/apps/default-app-home/api/auth",
+  "https://shopify-cin7-serial-number-pos.vercel.app/auth/callback",
+  "https://shopify-cin7-serial-number-pos.vercel.app/auth/shopify/callback",
+  "https://shopify-cin7-serial-number-pos.vercel.app/api/auth/callback"
+]
+
+[pos]
+embedded = true
