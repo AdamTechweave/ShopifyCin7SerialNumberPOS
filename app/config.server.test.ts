@@ -17,10 +17,8 @@ describe("loadConfig", () => {
     expect(() => loadConfig({CIN7_ACCOUNT_ID: "x"})).toThrow(/CIN7_APPLICATION_KEY/);
   });
 
-  it("applies defaults for tag", () => {
-    const config = loadConfig(BASE_ENV);
-    expect(config.serialTag).toBe("serialized");
-  });
+  // The serial-tag default moved to the extension when the tag lookup switched
+  // to direct API access — see extensions/pos-serials/src/lib/tags.test.ts.
 
   it("parses the location map", () => {
     const config = loadConfig({...BASE_ENV, CIN7_LOCATION_MAP: '{"123":"Auckland Store"}'});

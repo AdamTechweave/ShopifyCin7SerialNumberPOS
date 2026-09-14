@@ -61,9 +61,9 @@ Four parts, one app per client:
 4. **App backend** (React Router / Node, the Shopify app template server).
    Authenticates POS extension requests via `authenticate.public.checkout`
    (session-token validation; there is no `authenticate.public.pos` helper in this
-   CLI/template combination). Exposes:
-   - `POST /api/pos/product-tags` — batched product ID → is-serialized map, via the
-     Admin API.
+   CLI/template combination). It makes no Shopify API calls and needs no database
+   — the extension reads product tags itself through POS direct API access.
+   Exposes one route:
    - `GET /api/pos/serials?sku=&locationId=` — maps the Shopify location to its
      configured Cin7 location name, queries Cin7 Core, keeps rows with available
      stock > 0, orders current location first.
@@ -84,15 +84,14 @@ shopify.app.toml                          # app config: name, client_id, scopes
 vitest.config.ts                          # root test runner (app + extensions)
 app/
   shopify.server.ts                       # Shopify app template auth setup
+  session-storage.server.ts               # in-process sessions (no database)
   config.server.ts                        # per-client env config (getConfig/loadConfig)
   services/
     cache.server.ts                       # generic TTL cache
     cin7.server.ts                        # Cin7 Core HTTP client
     serials.server.ts                     # location grouping + SerialService (cached)
-    tags.server.ts                        # product GID + serialized-map helpers
   routes/
     api.pos.serials.tsx                   # GET serials by SKU + location
-    api.pos.product-tags.tsx              # POST product IDs -> serialized map
 extensions/
   serial-validation/                      # Cart & Checkout Validation Function
     shopify.extension.toml
@@ -107,7 +106,8 @@ extensions/
     src/screens/SerialPicker.tsx
     src/lib/serials.ts                    # pure cart/serial logic
     src/lib/assignSerial.ts               # rollback-safe split + property write
-    src/lib/api.ts                        # backend fetch helpers
+    src/lib/api.ts                        # Cin7 backend fetch + direct Admin API tag query
+    src/lib/tags.ts                       # SERIAL_TAG + product GID/serialized-map helpers
     src/lib/cartOps.ts                    # real POS cart ops + property-visibility wait
 docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md   # design doc
 docs/superpowers/notes/2026-07-pos-validation-spike.md           # POS-block spike (verdict: NO-GO)
@@ -119,14 +119,13 @@ README.md                                 # this file
 
 Copy `.env.example` to `.env` (local) or set them in the host's environment
 (production). None have a merchant-facing settings UI in v1 — Techweave manages
-them per deployment. The Cin7 and tag variables are listed below; the database and
-Shopify variables are covered in **Production deployment**.
+them per deployment. The Cin7 variables are listed below; the Shopify variables
+are covered in **Production deployment**. There is no database.
 
 | Variable | Description | Where to get it |
 |---|---|---|
 | `CIN7_ACCOUNT_ID` | Cin7 Core account ID for this client. | Create an application key at `inventory.dearsystems.com/ExternalAPI` (Cin7 Core admin → Integrations & API → API). The account ID is shown alongside the key you create. |
 | `CIN7_APPLICATION_KEY` | Cin7 Core application key paired with the account ID above. | Same `inventory.dearsystems.com/ExternalAPI` screen — generate a new application key for this integration. |
-| `SERIAL_TAG` | Product tag marking a serial-tracked product. Default `serialized`. | Agreed with the client; must match the tag they apply to serialized products in Shopify admin. |
 | `CIN7_LOCATION_MAP` | JSON object mapping each Shopify location ID (string) to the matching Cin7 Core location name (string), e.g. `{"12345678":"Main Warehouse"}`. | Shopify location ID: Shopify admin → Settings → Locations → open the location → the numeric ID is in the page URL. Cin7 location name: Cin7 Core → Settings → Locations (must match exactly, case-sensitive). |
 
 `CIN7_LOCATION_MAP` is validated on load (`app/config.server.ts`): it must parse as
@@ -216,7 +215,10 @@ even after being edited or deleted) — this is expected CLI behavior, not a bug
    Core location name.
 5. **If the client's serial tag isn't `serialized`**, change it in **two places**
    (both are required — the function's tag check does not read the env var):
-   - `.env`: set `SERIAL_TAG=<their tag>` (used by the backend's tag lookup).
+   - `extensions/pos-serials/src/lib/tags.ts`: set `SERIAL_TAG` to their tag. This
+     is a build-time constant, not an env var — the tag lookup runs in the POS
+     extension via direct API access, and a client bundle cannot read server env.
+     Changing it needs `shopify app deploy`, not just an env change.
    - `extensions/serial-validation/src/cart_validations_generate_run.graphql`: edit
      the `hasAnyTag(tags: ["serialized"])` literal to the client's tag.
 6. **Tag serialized products** in the client's Shopify catalog with that tag, and
@@ -304,6 +306,9 @@ done (from the design spec's acceptance criteria):
   training, plus catching gaps downstream in the Cin7 allocation flow), and the
   `serialized`-tag + `Serial Number` property data model means a missed serial is
   detectable after the fact rather than silent.
+- **`write_validations` was dropped from the app's scopes** before the first
+  production install, since the function below is never activated. Re-activating
+  it would mean re-adding the scope, which prompts the merchant to re-consent.
 - **The `serial-validation` function ships but is never activated.** It is
   retained in the repo (`extensions/serial-validation/`, unit-tested) only in
   case Shopify later extends validation functions to POS. Activating it today
@@ -341,7 +346,7 @@ done (from the design spec's acceptance criteria):
 - **No merchant-facing settings UI.** All per-client configuration is env vars,
   managed by Techweave — see the per-client rollout checklist above.
 
-## 8. Production deployment (Vercel + Supabase)
+## 8. Production deployment (Vercel)
 
 The backend is developer-hosted — Shopify does not host app servers. Their
 [hosting matrix](https://shopify.dev/docs/apps/build/app-surfaces) puts POS UI
@@ -351,24 +356,38 @@ components to you, and notes that an app still needs a developer-hosted backend
 backend is unavoidable here regardless: the Cin7 credentials must never reach the
 extension bundle, which is readable on the device.
 
-This app deploys to **Vercel**, alongside the existing Cin7 allocation service,
-with **Supabase Postgres** for session storage.
+This app deploys to **Vercel**, alongside the existing Cin7 allocation service.
+**It has no database.**
+
+### Why there is no database
+
+The backend is one route. `/api/pos/serials` proxies Cin7, holding the credential
+that can't ship to the device, and authenticates with
+`authenticate.public.checkout` — a signature check on the POS session token, with
+no storage and no network behind it.
+
+Everything Shopify-side happens on the device. The extension reads product tags
+through POS **direct API access** (`fetch("shopify:admin/api/graphql.json")`),
+which POS authenticates itself, so the app needs no stored offline token and
+therefore no session table. Sessions are held in process
+(`app/session-storage.server.ts`); `authenticate.admin` re-mints them from the
+request's ID token via token exchange, so a cold start costs one extra exchange.
+
+Direct API access needs POS **10.6.0+**, an extension targeting **2025-07 or
+later** (ours is `2026-04`), and the scopes declared in `shopify.app.toml`
+(`read_products` covers the tag query).
+
+⚠️ If anything later calls `unauthenticated.admin`, this breaks: it needs a
+*stored* session and cannot mint one on demand. That is the one change that
+would drag a database back in.
 
 ### One-time setup
 
-1. **Supabase**: create (or reuse) a project. From Project Settings → Database,
-   take both connection strings:
-   - Transaction pooler, port **6543** → `DATABASE_URL`, with
-     `?pgbouncer=true&connection_limit=1` appended. Serverless opens a connection
-     per invocation; the direct port will exhaust Postgres connections.
-   - Direct, port **5432** → `DIRECT_URL`. Migrations cannot run through
-     pgbouncer.
-2. **Vercel**: import the repo. Set every variable from `.env.example` in Project
-   Settings → Environment Variables (`CIN7_*`, `SERIAL_TAG`, `CIN7_LOCATION_MAP`,
-   `DATABASE_URL`, `DIRECT_URL`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`,
-   `SHOPIFY_APP_URL`, `SCOPES`). Vercel runs the `vercel-build` script, which
-   generates the Prisma client and applies migrations before building.
-3. **Point the app at the deployment.** Set `application_url` and the
+1. **Vercel**: import the repo. Set every variable from `.env.example` in Project
+   Settings → Environment Variables (`CIN7_ACCOUNT_ID`, `CIN7_APPLICATION_KEY`,
+   `CIN7_LOCATION_MAP`, `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`,
+   `SHOPIFY_APP_URL`, `SCOPES`).
+2. **Point the app at the deployment.** Set `application_url` and the
    `redirect_urls` in `shopify.app.toml` to the production Vercel URL, set
    `SHOPIFY_APP_URL` to the same value, then `shopify app deploy`.
 
@@ -376,7 +395,7 @@ with **Supabase Postgres** for session storage.
    its backend with **relative** URLs, which POS resolves against
    `application_url`; if it points anywhere else, every lookup fails and the tile
    sits on "Check serials" with no other clue.
-4. **Verify** before handing to staff:
+3. **Verify** before handing to staff:
    ```bash
    curl -s -o /dev/null -w "%{http_code}\n" \
      -A "Mozilla/5.0" "https://<your-app>.vercel.app/api/pos/serials?sku=X&locationId=1"

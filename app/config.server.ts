@@ -1,7 +1,6 @@
 export interface AppConfig {
   cin7AccountId: string;
   cin7ApplicationKey: string;
-  serialTag: string;
   /** Shopify numeric location ID (as string) → Cin7 location name */
   locationMap: Record<string, string>;
 }
@@ -41,7 +40,6 @@ export function loadConfig(env: EnvLike = process.env): AppConfig {
   return {
     cin7AccountId: required("CIN7_ACCOUNT_ID"),
     cin7ApplicationKey: required("CIN7_APPLICATION_KEY"),
-    serialTag: env.SERIAL_TAG || "serialized",
     locationMap,
   };
 }

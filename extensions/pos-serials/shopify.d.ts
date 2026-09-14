@@ -29,6 +29,14 @@ declare module './src/lib/api.ts' {
 }
 
 //@ts-ignore
+declare module './src/lib/tags.ts' {
+  const shopify:
+    | import('@shopify/ui-extensions/pos.home.tile.render').Api
+    | import('@shopify/ui-extensions/pos.home.modal.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
 declare module './src/screens/LineList.tsx' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
   const globalThis: { shopify: typeof shopify };

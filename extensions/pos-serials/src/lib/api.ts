@@ -1,23 +1,55 @@
 import type {AvailableSerial} from "./serials";
+import {SERIAL_TAG, toProductGid, buildSerializedMap} from "./tags";
 
 const tagCache = new Map<string, boolean>();
 
 let inflight: Promise<void> = Promise.resolve();
+
+// `nodes` takes at most 250 ids per request. The backend used to reject a
+// larger batch outright; chunking keeps a big cart working instead.
+const MAX_IDS_PER_REQUEST = 250;
+
+const PRODUCT_TAGS_QUERY = `
+  query productTags($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product { id tags }
+    }
+  }`;
+
+// The Admin response can carry a top-level `errors` array alongside `data`
+// per the GraphQL-over-HTTP spec, so a 200 alone doesn't mean success.
+type ProductTagsResponse = {
+  data?: {nodes: Array<{id: string; tags: string[]} | null>};
+  errors?: unknown[];
+};
+
+async function loadTags(productIds: number[]): Promise<void> {
+  // Direct API access — POS authenticates this against the Admin API itself.
+  // No credential in the bundle, and no round trip through our backend.
+  const response = await fetch("shopify:admin/api/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: PRODUCT_TAGS_QUERY,
+      variables: {ids: productIds.map(toProductGid)},
+    }),
+  });
+  if (!response.ok) throw new Error(`product tags request failed: ${response.status}`);
+  const json = (await response.json()) as ProductTagsResponse;
+  if (json.errors?.length || !json.data?.nodes) {
+    throw new Error("product tags request returned errors");
+  }
+  const serialized = buildSerializedMap(json.data.nodes, SERIAL_TAG);
+  for (const [id, value] of Object.entries(serialized)) tagCache.set(id, value);
+}
 
 export async function fetchSerializedMap(
   productIds: number[],
 ): Promise<Record<string, boolean>> {
   const request = inflight.then(async () => {
     const unknown = [...new Set(productIds)].filter((id) => !tagCache.has(String(id)));
-    if (unknown.length === 0) return;
-    const response = await fetch("/api/pos/product-tags", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({productIds: unknown}),
-    });
-    if (!response.ok) throw new Error(`product-tags request failed: ${response.status}`);
-    const {serialized} = (await response.json()) as {serialized: Record<string, boolean>};
-    for (const [id, value] of Object.entries(serialized)) tagCache.set(id, Boolean(value));
+    for (let i = 0; i < unknown.length; i += MAX_IDS_PER_REQUEST) {
+      await loadTags(unknown.slice(i, i + MAX_IDS_PER_REQUEST));
+    }
   });
   inflight = request.catch(() => {});
   await request;
