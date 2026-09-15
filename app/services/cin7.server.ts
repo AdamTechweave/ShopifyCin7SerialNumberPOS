@@ -27,6 +27,7 @@ export class Cin7Error extends Error {
 }
 
 const BASE_URL = "https://inventory.dearsystems.com/ExternalApi/v2";
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class Cin7Client {
   constructor(
@@ -35,18 +36,30 @@ export class Cin7Client {
     private fetchFn: typeof fetch = fetch,
   ) {}
 
-  private async get<T>(path: string, params: Record<string, string>): Promise<T> {
+  private async request<T>(
+    method: "GET" | "POST",
+    path: string,
+    opts: {params?: Record<string, string>; body?: unknown} = {},
+  ): Promise<T> {
     const url = new URL(`${BASE_URL}/${path}`);
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    for (const [key, value] of Object.entries(opts.params ?? {})) {
+      url.searchParams.set(key, value);
+    }
 
     let response: Response;
     try {
       response = await this.fetchFn(url.toString(), {
+        method,
         headers: {
           "api-auth-accountid": this.accountId,
           "api-auth-applicationkey": this.applicationKey,
           "Content-Type": "application/json",
         },
+        ...(opts.body === undefined ? {} : {body: JSON.stringify(opts.body)}),
+        // Node's fetch has no default timeout. Without this a stalled Cin7
+        // connection hangs the request forever — and mid-stock-adjustment that
+        // leaves the write's outcome genuinely unknown.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
       throw new Cin7Error("UNREACHABLE", `Cin7 request failed: ${error}`);
@@ -62,6 +75,10 @@ export class Cin7Client {
       throw new Cin7Error("BAD_RESPONSE", `Cin7 returned ${response.status}`);
     }
     return response.json() as Promise<T>;
+  }
+
+  private get<T>(path: string, params: Record<string, string>): Promise<T> {
+    return this.request<T>("GET", path, {params});
   }
 
   async getAvailability(sku: string): Promise<Cin7AvailabilityRow[]> {

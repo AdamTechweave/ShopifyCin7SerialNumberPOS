@@ -67,4 +67,18 @@ describe("Cin7Client", () => {
     expect(await client.skuExists("WIDGET-001")).toBe(true);
     expect(fetchFn.mock.calls[0][0]).toContain("/ExternalApi/v2/product");
   });
+
+  it("sends an abort signal so a hung Cin7 response cannot hang the request", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ProductAvailabilityList: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await client.getAvailability("WIDGET-001");
+    const [, init] = fetchFn.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("maps an aborted request to UNREACHABLE", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new DOMException("aborted", "TimeoutError"));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await expect(client.getAvailability("WIDGET-001")).rejects.toMatchObject({code: "UNREACHABLE"});
+  });
 });
