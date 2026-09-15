@@ -1,4 +1,4 @@
-import {describe, it, expect, vi, afterEach} from "vitest";
+import {describe, it, expect, vi, beforeEach} from "vitest";
 
 const transform = vi.fn();
 vi.mock("../services/serial-transform.server", () => ({
@@ -19,7 +19,13 @@ const post = (body: unknown) =>
 
 const VALID = {sku: "BIKE", serial: "BIKE001", locationId: "999", direction: "assemble"};
 
-afterEach(() => transform.mockReset());
+beforeEach(() => {
+  // Block body, not an arrow expression: mockReset() returns the mock, and
+  // Vitest treats a function returned from beforeEach as a teardown callback,
+  // invoking it again after the test. With mockRejectedValue configured that
+  // phantom call becomes an unawaited rejection that fails the test.
+  transform.mockReset();
+});
 
 describe("POST /api/pos/serial-transform", () => {
   it("returns the service result on success", async () => {
@@ -33,6 +39,12 @@ describe("POST /api/pos/serial-transform", () => {
     transform.mockResolvedValue({status: "preview", fromSerial: "BIKE001", toSerial: "A-BIKE001", unitCost: 450, costSource: "average"});
     await post({...VALID, dryRun: true});
     expect(transform).toHaveBeenCalledWith(expect.objectContaining({dryRun: true}));
+  });
+
+  it("defaults an omitted dryRun to false rather than undefined", async () => {
+    transform.mockResolvedValue({status: "ok", fromSerial: "BIKE001", toSerial: "A-BIKE001", unitCost: 450, costSource: "average", taskId: "t1"});
+    await post(VALID);
+    expect(transform).toHaveBeenCalledWith(expect.objectContaining({dryRun: false}));
   });
 
   // The route must not enumerate the result union — it passes every status
