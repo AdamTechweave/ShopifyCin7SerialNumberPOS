@@ -5,8 +5,12 @@ export interface Cin7AvailabilityRow {
   Barcode: string | null;
   Location: string;
   Bin: string | null;
-  /** Batch OR serial number; null for non-tracked stock or unpicked allocations */
-  Batch: string | null;
+  /**
+   * Batch OR serial number; null for non-tracked stock or unpicked
+   * allocations. Cin7 can return this as a JSON number for a purely numeric
+   * serial — callers must compare via `String(row.Batch)`.
+   */
+  Batch: string | number | null;
   ExpiryDate: string | null;
   OnHand: number;
   Allocated: number;
@@ -43,7 +47,8 @@ export interface StockAdjustmentResponse {
 }
 
 export interface Cin7Movement {
-  BatchSN: string | null;
+  /** Same Batch/serial field as Cin7AvailabilityRow.Batch — can also arrive as a JSON number; compare via `String(m.BatchSN)`. */
+  BatchSN: string | number | null;
   Location: string;
   Quantity: number;
   /** Cost of the whole movement (all `Quantity` units), not a per-unit cost — divide by `Quantity` to get one. */

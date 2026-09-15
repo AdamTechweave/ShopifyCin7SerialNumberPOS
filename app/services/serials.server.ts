@@ -21,7 +21,10 @@ export function groupSerials(
   return rows
     .filter((r) => r.Batch !== null && r.Batch !== "" && r.Available > 0)
     .map((r) => ({
-      serial: r.Batch as string,
+      // Cin7's Batch can arrive as a JSON number for a purely numeric
+      // serial — String() converts it for real, where `as string` would
+      // only have relabelled the type and left a number at runtime.
+      serial: String(r.Batch),
       locationName: r.Location,
       available: r.Available,
       isCurrentLocation: r.Location === currentLocationName,

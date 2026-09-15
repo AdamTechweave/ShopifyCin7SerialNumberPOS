@@ -94,8 +94,8 @@ export class TransformService {
     // serial. Cin7's BatchSN can also arrive as a JSON number for a purely
     // numeric serial (see cost.server.ts), so compare via String(r.Batch).
     const rows = await this.client.getAvailability(sku);
-    const isTrackedAt = (r: Cin7AvailabilityRow, target: string) =>
-      r.Batch !== null && r.Batch !== "" && String(r.Batch) === target && r.Location === locationName;
+    const isTrackedAt = (r: Cin7AvailabilityRow, wanted: string) =>
+      r.Batch !== null && r.Batch !== "" && String(r.Batch) === wanted && r.Location === locationName;
 
     // Cin7 enforces no serial uniqueness, so the same serial can legitimately
     // appear as more than one row at a location (e.g. split across bins).
@@ -115,6 +115,12 @@ export class TransformService {
     const totalAllocated = sourceRows.reduce((n, r) => n + r.Allocated, 0);
     if (totalOnHand !== 1) return {status: "not_single_unit"};
     if (totalAllocated !== 0) return {status: "serial_allocated"};
+
+    // The write posts a single binless line, and Cin7 may apply it per-bin,
+    // so a source split across rows cannot be expressed safely. Requiring
+    // exactly one row also stops a negative quantity hiding inside the sums
+    // above (OnHand [2, -1] sums to 1 while a 2-unit row would be zeroed).
+    if (sourceRows.length !== 1) return {status: "not_single_unit"};
 
     // target_exists is our only defence against duplicate serials — Cin7
     // enforces no uniqueness of its own — so this must catch a target

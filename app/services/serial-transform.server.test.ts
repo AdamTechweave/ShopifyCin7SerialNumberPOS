@@ -117,6 +117,18 @@ describe("TransformService.transform", () => {
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
   });
 
+  it("refuses a source split across rows even when the sums cancel out to look like one unit", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([
+        stockRow("BIKE001", {onHand: 2, allocated: 0, available: 2}),
+        stockRow("BIKE001", {onHand: -1, allocated: 0, available: -1}),
+      ]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "not_single_unit"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
   it("refuses an empty serial before any Cin7 call, even with a blank-Batch row present", async () => {
     const client = makeClient({
       getAvailability: vi.fn().mockResolvedValue([stockRow("", {onHand: 1, allocated: 0, available: 1})]),
