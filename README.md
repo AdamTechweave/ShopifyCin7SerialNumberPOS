@@ -311,6 +311,22 @@ Run `npm run typecheck` before `shopify app build` / `shopify app deploy`. The
 extension's `tsconfig.json` excludes `dist/`, so a previous build's output doesn't
 need to be cleared first.
 
+### Verify everything at once
+
+```bash
+npm run verify
+```
+
+Runs typecheck (both projects), the test suite, lint, **and `react-router build`**.
+
+Include the build. Typecheck, tests and lint can all pass on a tree that fails to
+build — that happened on this branch: a colocated route test in `app/routes/` was
+picked up by `flatRoutes()` as a route module, and because a route test necessarily
+imports the server-only modules its route imports, React Router's server-code
+splitting failed the Vercel build while every other check stayed green. `app/routes.ts`
+now passes `ignoredRouteFiles: ["**/*.test.*"]`; Vitest is unaffected, since its
+include globs are independent of routing.
+
 Build the web app (React Router) with:
 
 ```bash
