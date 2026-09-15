@@ -22,6 +22,11 @@ Cin7, and the write cannot be undone from the app.** Do it on a disposable unit.
 - [ ] That product tagged `serialized` in Shopify, with a SKU set.
 - [ ] Cin7 admin open in a browser, so you can verify writes independently of the app.
 - [ ] Know the expected unit cost of the test serial before you start.
+- [ ] **Search Cin7 for any existing serial that already starts with `A-`** on this client's
+      data. The app infers direction from that prefix, so a supplier serial legitimately
+      beginning `A-` would be treated as already-assembled forever and could never be
+      assembled through this UI. If you find any, **stop and report it** — the UI needs an
+      explicit direction selector before this client goes live.
 
 ---
 
@@ -41,6 +46,10 @@ Then the states that matter more than the happy path:
 - [ ] **A SKU Cin7 doesn't know** → "doesn't match any Cin7 product", naming the SKU.
 - [ ] **A serialised product with no stock** → "No available serial numbers", not a blank screen.
 - [ ] **Airplane mode** → "Can't reach Cin7" with a working **Retry**.
+- [ ] **Airplane mode during a dry run** (tap Transform serial, pick a serial, then kill the
+      network before the confirm screen loads) → the message must say the **lookup** failed
+      and that it is safe to try again. It must **not** say "the adjustment may have been
+      written" — nothing was written, and that wording is reserved for real write failures.
 
 > A **blank screen** in any of these is a bug — report it. An earlier build returned
 > nothing for two of these states and it was specifically fixed.
@@ -67,8 +76,7 @@ Now force each refusal and check the wording. None of these writes anything:
 
 | Set up | Expected |
 |---|---|
-| Pick a serial already starting with `A-`, choose Assemble | "already assembled" |
-| Pick a non-prefixed serial, choose Disassemble | "is not an assembled serial" |
+| Pick a serial already starting with `A-` | The action offered is **Disassemble**, not Assemble — direction is inferred from the prefix, so you cannot choose the wrong one. Confirm the screen uses a **warning** tone and leads with the consequence ("This will UN-assemble a built unit"), not with the serials |
 | A serial whose location isn't in `CIN7_LOCATION_MAP` | "isn't mapped to a Cin7 location" |
 | A serial allocated to an open Cin7 order | "is allocated to an order" |
 | A **batch** line holding more than one unit | "doesn't hold exactly one unit … Check it in Cin7" |
@@ -94,6 +102,9 @@ Then verify **in Cin7, not in the app**:
 - [ ] Both are at the **same location**.
 - [ ] The unit cost on the new serial **matches what the confirm screen showed**.
 - [ ] The adjustment is **completed**, not sitting in draft.
+- [ ] The result screen reports Cin7's own line counts — expect **1 existing, 1 new**. If it
+      says *0 existing, 2 new*, Cin7 did **not** zero the old serial and you now have two
+      units. Stop immediately and report it; the success banner cannot be trusted in that case.
 
 > These six checks are the point of Phase 2. Six Cin7 behaviours could not be settled from
 > its documentation — in particular whether it accepts two lines differing only by serial
