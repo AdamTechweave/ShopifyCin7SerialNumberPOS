@@ -141,9 +141,19 @@ read** — `/ref/productavailability` has a `Batch` filter but no cost field, an
 `resolveUnitCost(sku, serial, locationName)` therefore resolves in order:
 
 1. **Movements** — `GET /product?Sku=…&IncludeMovements=true`, filter `Movements[]` by
-   `BatchSN` and `Location`, take the most recent inbound `Amount / Quantity`. This is
-   the only per-serial cost the API exposes. Guarded: if the movement list exceeds
-   `MAX_MOVEMENTS_SCANNED` (2000), abandon this source rather than scan unbounded.
+   `BatchSN` and `Location`, walking matching inbound movements newest-first and taking
+   the first that yields a positive unit cost from `Amount / Quantity`. This is the only
+   per-serial cost the API exposes.
+
+   > **Superseded during implementation.** This section originally specified a
+   > `MAX_MOVEMENTS_SCANNED` cap of 2000, to avoid scanning an unbounded history. Review
+   > established the cap was in the wrong place: `getProductWithMovements` has already
+   > fetched and parsed the whole payload by the time this pure function runs, so the cap
+   > saved no work and only degraded accuracy on exactly the high-traffic SKUs that most
+   > need serial-level precision. It was removed. The real mitigation would be a
+   > server-side filter, which Cin7's `/product` does not offer — there is no `BatchSN`
+   > query parameter. The filter runs before the sort, so the sort only ever sees the
+   > matching subset.
 2. **`Product.AverageCost`** — product-level fallback.
 3. **Fail** — if neither yields a positive number, refuse the transform rather than
    guess. A wrong cost silently corrupts inventory valuation.
