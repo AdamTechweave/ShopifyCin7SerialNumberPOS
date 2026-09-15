@@ -14,7 +14,8 @@
     "shopify": "shopify",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "typecheck": "react-router typegen && tsc --noEmit",
+    "typecheck": "react-router typegen && tsc --noEmit && npm run typecheck:extensions",
+    "typecheck:extensions": "tsc --noEmit -p extensions/pos-serials/tsconfig.json",
     "test": "vitest run",
     "vercel-build": "react-router build"
   },
