@@ -13,10 +13,23 @@ declare module './src/Modal.tsx' {
 }
 
 //@ts-ignore
+declare module './src/ProductMenuItem.tsx' {
+  const shopify: import('@shopify/ui-extensions/pos.product-details.action.menu-item.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/ProductModal.tsx' {
+  const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
 declare module './src/lib/serials.ts' {
   const shopify:
     | import('@shopify/ui-extensions/pos.home.tile.render').Api
-    | import('@shopify/ui-extensions/pos.home.modal.render').Api;
+    | import('@shopify/ui-extensions/pos.home.modal.render').Api
+    | import('@shopify/ui-extensions/pos.product-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
@@ -33,7 +46,8 @@ declare module './src/lib/api.ts' {
 declare module './src/lib/tags.ts' {
   const shopify:
     | import('@shopify/ui-extensions/pos.home.tile.render').Api
-    | import('@shopify/ui-extensions/pos.home.modal.render').Api;
+    | import('@shopify/ui-extensions/pos.home.modal.render').Api
+    | import('@shopify/ui-extensions/pos.product-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
@@ -50,14 +64,6 @@ declare module './src/screens/SerialPicker.tsx' {
 }
 
 //@ts-ignore
-declare module './src/screens/SerialList.tsx' {
-  const shopify:
-    | import('@shopify/ui-extensions/pos.home.modal.render').Api
-    | import('@shopify/ui-extensions/pos.product-details.action.render').Api;
-  const globalThis: { shopify: typeof shopify };
-}
-
-//@ts-ignore
 declare module './src/lib/assignSerial.ts' {
   const shopify: import('@shopify/ui-extensions/pos.home.modal.render').Api;
   const globalThis: { shopify: typeof shopify };
@@ -70,14 +76,10 @@ declare module './src/lib/cartOps.ts' {
 }
 
 //@ts-ignore
-declare module './src/ProductMenuItem.tsx' {
-  const shopify: import('@shopify/ui-extensions/pos.product-details.action.menu-item.render').Api;
-  const globalThis: { shopify: typeof shopify };
-}
-
-//@ts-ignore
-declare module './src/ProductModal.tsx' {
-  const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
+declare module './src/screens/SerialList.tsx' {
+  const shopify:
+    | import('@shopify/ui-extensions/pos.home.modal.render').Api
+    | import('@shopify/ui-extensions/pos.product-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
@@ -89,6 +91,18 @@ declare module './src/screens/ProductSerials.tsx' {
 
 //@ts-ignore
 declare module './src/screens/SerialTransform.tsx' {
+  const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/lib/transform.ts' {
+  const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/lib/outcome.ts' {
   const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
