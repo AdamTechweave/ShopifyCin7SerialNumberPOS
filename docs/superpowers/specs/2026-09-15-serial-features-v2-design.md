@@ -89,7 +89,7 @@ half so both screens share it rather than forking it:
   location-sectioned list (current location first). No cart awareness.
 - `SerialPicker.tsx` keeps `excludeInCart`, the `onChoose` cart wiring, and the
   scanner auto-select effect, and renders `SerialList` for the list itself.
-- `ProductSerialsModal.tsx` renders `SerialList` with **no** `onSelect` — read-only.
+- `screens/ProductSerials.tsx` renders `SerialList` with **no** `onSelect` — read-only.
 
 `ProductVariant.sku` is `sku?: string`. A variant with no SKU gets an explicit
 "No SKU set for this variant" state, not a failed lookup.
@@ -140,7 +140,7 @@ read** — `/ref/productavailability` has a `Batch` filter but no cost field, an
 
 `resolveUnitCost(sku, serial, locationName)` therefore resolves in order:
 
-1. **Movements** — `GET /product?SKU=…&IncludeMovements=true`, filter `Movements[]` by
+1. **Movements** — `GET /product?Sku=…&IncludeMovements=true`, filter `Movements[]` by
    `BatchSN` and `Location`, take the most recent inbound `Amount / Quantity`. This is
    the only per-serial cost the API exposes. Guarded: if the movement list exceeds
    `MAX_MOVEMENTS_SCANNED` (2000), abandon this source rather than scan unbounded.
@@ -203,7 +203,7 @@ mapping, and add:
   Cin7 response hangs the request indefinitely. Tolerable for a GET, dangerous
   mid-adjustment, where it leaves the outcome genuinely unknown.
 - `createStockAdjustment(payload)` → `POST /stockadjustment`
-- `getProductWithMovements(sku)` → `GET /product?SKU=…&IncludeMovements=true`
+- `getProductWithMovements(sku)` → `GET /product?Sku=…&IncludeMovements=true`
 
 Both 429 **and** 503 already map to `RATE_LIMITED`, which is correct — Cin7's docs use
 both codes for the rate limit across versions.
