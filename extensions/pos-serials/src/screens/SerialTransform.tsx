@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from "preact/hooks";
+import {useCallback, useEffect, useRef, useState} from "preact/hooks";
 import {
   fetchSerials,
   fetchVariantSku,
@@ -369,6 +369,7 @@ interface ConfirmStepProps {
 function ConfirmStep({sku, serial, direction, target, locationName, onBack, onResult}: ConfirmStepProps) {
   const [preview, setPreview] = useState<TransformResponse | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,13 +416,19 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
       </s-section>
       <s-button
         onClick={async () => {
-          if (submitting) return;
+          // Ref, not state: `submitting` is captured at render time, so two
+          // taps in the same frame would both see `false` and both fire the
+          // write. Cin7 has no idempotency key, so both would land as
+          // separate stock adjustments.
+          if (submittingRef.current) return;
+          submittingRef.current = true;
           setSubmitting(true);
           const locationId = String(shopify.session.currentSession.locationId);
           try {
             const response = await postSerialTransform({sku, serial, locationId, direction});
             onResult(response);
           } finally {
+            submittingRef.current = false;
             setSubmitting(false);
           }
         }}
