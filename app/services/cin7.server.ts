@@ -46,7 +46,7 @@ export interface Cin7Movement {
   BatchSN: string | null;
   Location: string;
   Quantity: number;
-  /** Cost of the moved goods, per Cin7's docs. */
+  /** Cost of the whole movement (all `Quantity` units), not a per-unit cost — divide by `Quantity` to get one. */
   Amount: number;
   Date: string;
   Type: string;
@@ -129,6 +129,13 @@ export class Cin7Client {
   }
 
   async skuExists(sku: string): Promise<boolean> {
+    // KNOWN ISSUE, deliberately not fixed here: /product's Sku filter is a
+    // CONTAINS match (see getProductWithMovements), so this returns true when
+    // only a SKU *containing* `sku` exists. Consequence is limited to the
+    // picker reporting "no stock" rather than "SKU not found" — and the wrong
+    // answer is cached for SKU_EXISTS_TTL_MS (see serials.server.ts). No write
+    // path depends on it. The failure is one-directional: a real SKU always
+    // contains itself, so this never wrongly reports a genuine product as missing.
     const data = await this.get<{Products?: unknown[]}>("product", {Sku: sku, Page: "1", Limit: "1"});
     return (data.Products?.length ?? 0) > 0;
   }
