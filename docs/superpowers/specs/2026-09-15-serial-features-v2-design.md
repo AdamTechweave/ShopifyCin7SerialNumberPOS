@@ -249,7 +249,7 @@ production transform is done deliberately.
 | # | Assumption | Risk | Mitigation |
 |---|---|---|---|
 | 1 | `POST` with `Status: "COMPLETED"` completes in one call | Every doc example POSTs `DRAFT` then `PUT`s `COMPLETED` | `dryRun`, then verify on first live call; response asserts on status |
-| 2 | **`UnitCost` on a `Quantity: 0` line is ignored** | **Highest risk.** If honoured, a wrong value corrupts the write-off | Send the resolved cost on both lines so either interpretation is correct |
+| 2 | How `UnitCost` is treated on the `Quantity: 0` line | Downgraded after reading the blueprint directly: `Lines` on POST is typed `[] New Stock Line Model`, where `UnitCost` is **Required**. `ExistingStockLineModel` (no cost field) is only how Cin7 classifies lines in the *response*, never what we send. So supplying the resolved cost on both lines is mandated, not a guess | Send the resolved cost on both lines; assert on the response's line split |
 | 3 | One document accepts two lines differing only by `BatchSN` | Cin7 might merge or reject them | Assert on the `ExistingStockLines`/`NewStockLines` split |
 | 4 | `UpdateOnHand: true` behaves correctly for serialised stock | Default `false` adjusts the wrong quantity | Set explicitly; verify on first live call |
 | 5 | No serial uniqueness enforcement | A duplicate `A-BIKE001` can be created | Pre-check availability; never auto-retry |
