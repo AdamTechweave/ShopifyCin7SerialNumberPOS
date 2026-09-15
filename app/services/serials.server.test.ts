@@ -39,6 +39,30 @@ describe("groupSerials", () => {
     expect(result[0].isCurrentLocation).toBe(true);
     expect(result[1].isCurrentLocation).toBe(false);
   });
+
+  it("converts a numeric Batch to a string serial", () => {
+    const rows = [row({Batch: 12345})];
+    const result = groupSerials(rows, null);
+    expect(result[0].serial).toEqual("12345");
+    expect(typeof result[0].serial).toBe("string");
+  });
+
+  it("does not throw sorting two same-location serials when one Batch is numeric", () => {
+    // Cin7 can return Batch as a JSON number for a purely numeric serial.
+    // `r.Batch as string` would relabel it without converting, and the sort
+    // below (a.serial.localeCompare(b.serial)) throws a TypeError on the
+    // real number — which escaped SerialService.lookup as an uncaught 500
+    // in the deployed picker. String(r.Batch) is what prevents that.
+    const rows = [
+      row({Batch: "SN-001", Location: "Auckland"}),
+      row({Batch: 12345, Location: "Auckland"}),
+    ];
+    let result: ReturnType<typeof groupSerials> = [];
+    expect(() => {
+      result = groupSerials(rows, null);
+    }).not.toThrow();
+    expect(result.every((s) => typeof s.serial === "string")).toBe(true);
+  });
 });
 
 describe("SerialService.lookup", () => {

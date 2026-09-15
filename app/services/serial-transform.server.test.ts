@@ -148,6 +148,22 @@ describe("TransformService.transform", () => {
     expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores a null-Batch row rather than letting it collide with a serial literally named \"null\"", async () => {
+    // Without `r.Batch !== null` in isTrackedAt, String(null) === "null"
+    // would make this untracked/allocated row match a serial spelled
+    // "null" too, inflating sourceRows past one and refusing a legitimate
+    // transform.
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([
+        {...row("null"), Batch: null},
+        row("null"),
+      ]),
+    });
+    const result = await svc(client).transform({...input, serial: "null"});
+    expect(result).toMatchObject({status: "ok", fromSerial: "null", toSerial: "A-null"});
+    expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses shopifyLocationId \"constructor\" rather than resolving an inherited Object.prototype value", async () => {
     const client = makeClient();
     const result = await svc(client).transform({...input, shopifyLocationId: "constructor"});
