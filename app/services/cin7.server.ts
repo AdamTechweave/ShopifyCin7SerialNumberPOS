@@ -107,7 +107,11 @@ export class Cin7Client {
       throw new Cin7Error("AUTH_FAILED", `Cin7 rejected credentials (${response.status})`);
     }
     if (!response.ok) {
-      throw new Cin7Error("BAD_RESPONSE", `Cin7 returned ${response.status}`);
+      const detail = await response.text().catch(() => "");
+      throw new Cin7Error(
+        "BAD_RESPONSE",
+        `Cin7 returned ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ""}`,
+      );
     }
     return response.json() as Promise<T>;
   }
@@ -135,10 +139,14 @@ export class Cin7Client {
 
   async getProductWithMovements(
     sku: string,
-  ): Promise<{AverageCost?: number; Movements?: Cin7Movement[]}> {
+  ): Promise<{SKU?: string; AverageCost?: number; Movements?: Cin7Movement[]}> {
     const data = await this.request<{
-      Products?: Array<{AverageCost?: number; Movements?: Cin7Movement[]}>;
-    }>("GET", "product", {params: {Sku: sku, IncludeMovements: "true", Page: "1", Limit: "1"}});
-    return data.Products?.[0] ?? {};
+      Products?: Array<{SKU?: string; AverageCost?: number; Movements?: Cin7Movement[]}>;
+    }>("GET", "product", {params: {Sku: sku, IncludeMovements: "true", Page: "1", Limit: "100"}});
+    // Cin7's /product Sku filter is a CONTAINS match, not exact: asking for
+    // "BIKE" also returns "BIKE-CARBON". Taking [0] would resolve a cost from
+    // the wrong product, so match the SKU exactly and fall through to {} —
+    // which resolveUnitCost already treats as "refuse to guess".
+    return data.Products?.find((p) => p.SKU === sku) ?? {};
   }
 }

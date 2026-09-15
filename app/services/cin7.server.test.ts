@@ -123,4 +123,12 @@ describe("Cin7Client", () => {
     const client = new Cin7Client("acct", "key", fetchFn);
     expect(await client.getProductWithMovements("NOPE")).toEqual({});
   });
+
+  it("ignores a substring SKU match and refuses to guess", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({
+      Products: [{SKU: "BIKE-CARBON", AverageCost: 4500}, {SKU: "BIKE", AverageCost: 450}],
+    }));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    expect(await client.getProductWithMovements("BIKE")).toEqual({SKU: "BIKE", AverageCost: 450});
+  });
 });
