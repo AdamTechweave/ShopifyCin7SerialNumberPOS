@@ -1,9 +1,10 @@
 import {render} from "preact";
 import {useState} from "preact/hooks";
 import {ProductSerials} from "./screens/ProductSerials";
+import {SerialTransform} from "./screens/SerialTransform";
 
 // A target maps to exactly one module, so this one module serves both the
-// "view serials" feature (this task) and "transform serial" (next task).
+// "view serials" feature and "transform serial" feature.
 type Screen = "menu" | "serials" | "transform";
 
 export default async () => {
@@ -18,16 +19,7 @@ function ProductModal() {
   }
 
   if (screen === "transform") {
-    // Placeholder — the next task replaces this with the real transform
-    // screen. Not meant to ship as-is.
-    return (
-      <s-page heading="Transform serial">
-        <s-section>
-          <s-text>{"Serial transform isn't available yet."}</s-text>
-        </s-section>
-        <s-button onClick={() => setScreen("menu")}>Back</s-button>
-      </s-page>
-    );
+    return <SerialTransform onDone={() => setScreen("menu")} />;
   }
 
   return (

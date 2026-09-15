@@ -86,3 +86,9 @@ declare module './src/screens/ProductSerials.tsx' {
   const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
+
+//@ts-ignore
+declare module './src/screens/SerialTransform.tsx' {
+  const shopify: import('@shopify/ui-extensions/pos.product-details.action.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
