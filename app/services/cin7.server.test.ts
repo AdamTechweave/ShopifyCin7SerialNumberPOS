@@ -61,6 +61,53 @@ describe("Cin7Client", () => {
     expect(error).toMatchObject({code: "BAD_RESPONSE"});
   });
 
+  it("tags a Cin7Error from a read call (getAvailability) as read-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client.getAvailability("X").catch((e) => e);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "read"});
+  });
+
+  it("tags a Cin7Error from getProductWithMovements as read-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client.getProductWithMovements("X").catch((e) => e);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "read"});
+  });
+
+  it("tags a Cin7Error from createStockAdjustment (the write) as write-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client
+      .createStockAdjustment({
+        EffectiveDate: "2026-09-15T00:00:00.000",
+        Status: "COMPLETED",
+        Reference: "r",
+        Comment: "c",
+        UpdateOnHand: true,
+        Lines: [],
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(Cin7Error);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "write"});
+  });
+
+  it("tags a network-level Cin7Error from createStockAdjustment as write-phase too", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client
+      .createStockAdjustment({
+        EffectiveDate: "2026-09-15T00:00:00.000",
+        Status: "COMPLETED",
+        Reference: "r",
+        Comment: "c",
+        UpdateOnHand: true,
+        Lines: [],
+      })
+      .catch((e) => e);
+    expect(error).toMatchObject({code: "UNREACHABLE", phase: "write"});
+  });
+
   it("skuExists checks the product endpoint", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Total: 1, Products: [{SKU: "WIDGET-001"}]}));
     const client = new Cin7Client("acct", "key", fetchFn);

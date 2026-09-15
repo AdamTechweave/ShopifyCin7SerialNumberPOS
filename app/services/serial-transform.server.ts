@@ -11,6 +11,18 @@ export type TransformResult =
       unitCost: number;
       costSource: "movement" | "average";
       taskId: string | null;
+      /**
+       * Counts from the write response's `ExistingStockLines`/`NewStockLines`
+       * split — the confirmation the spec calls for that Cin7 read our
+       * intent correctly (one line zeroed, one created), not just that
+       * `NewStockLines` was non-empty. Surfaced to staff rather than
+       * enforced as a guard: if Cin7 ever misclassifies the zeroed source
+       * line as "new" instead of "existing", a hard `existingLineCount > 0`
+       * requirement would fail every transform rather than reveal the
+       * mismatch.
+       */
+      existingLineCount: number;
+      newLineCount: number;
     }
   | {status: "preview"; fromSerial: string; toSerial: string; unitCost: number; costSource: "movement" | "average"}
   | {status: "already_transformed"}
@@ -32,7 +44,7 @@ export type TransformResult =
    * idempotency key nor serial-uniqueness checking to catch the duplicate.
    * Find and verify the adjustment in Cin7 by `taskId` instead.
    */
-  | {status: "written_unconfirmed"; taskId: string | null};
+  | {status: "written_unconfirmed"; taskId: string | null; existingLineCount: number; newLineCount: number};
 
 /**
  * Stable, human-legible reference for the stock adjustment. Not used for
@@ -159,14 +171,18 @@ export class TransformService {
 
     const taskId = response.TaskID ?? null;
 
+    // Array.isArray guards against a truthy-but-non-array
+    // ExistingStockLines/NewStockLines, whose `.length` would be `undefined`.
+    const existingLineCount = Array.isArray(response.ExistingStockLines)
+      ? response.ExistingStockLines.length
+      : 0;
+    const newLineCount = Array.isArray(response.NewStockLines) ? response.NewStockLines.length : 0;
+
     // Cin7 might merge or reject two lines that differ only by BatchSN — a
     // 2xx alone doesn't prove the target serial was actually created. Require
     // evidence of a new stock line before reporting success back to staff,
-    // since there is no undo against a real warehouse. Array.isArray guards
-    // against a truthy-but-non-array NewStockLines, whose `.length` would be
-    // `undefined` and would otherwise be treated as confirmed.
-    const hasNewStockLine = Array.isArray(response.NewStockLines) && response.NewStockLines.length > 0;
-    if (!hasNewStockLine) return {status: "written_unconfirmed", taskId};
+    // since there is no undo against a real warehouse.
+    if (newLineCount === 0) return {status: "written_unconfirmed", taskId, existingLineCount, newLineCount};
 
     return {
       status: "ok",
@@ -175,6 +191,8 @@ export class TransformService {
       unitCost: cost.unitCost,
       costSource: cost.source,
       taskId,
+      existingLineCount,
+      newLineCount,
     };
   }
 }

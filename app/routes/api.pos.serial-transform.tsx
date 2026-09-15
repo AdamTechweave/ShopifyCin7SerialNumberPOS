@@ -59,7 +59,10 @@ export const action = async ({request}: ActionFunctionArgs) => {
       // An exception from the write phase is exactly when the cache is
       // least trustworthy — invalidate here too, not only on a clean result.
       if (!isDryRun) getSerialService().invalidate(sku);
-      return cors(Response.json({error: error.code}, {status: 502}));
+      // `error.phase` distinguishes a pre-write lookup failure (nothing
+      // written — safe to retry) from a failure during the write itself
+      // (may have written — never retry). See Cin7Error's phase comment.
+      return cors(Response.json({error: error.code, phase: error.phase}, {status: 502}));
     }
     throw error;
   }

@@ -93,6 +93,9 @@ export type TransformResponse =
       unitCost: number;
       costSource: "movement" | "average";
       taskId: string | null;
+      /** ExistingStockLines/NewStockLines counts — see server-side TransformResult. */
+      existingLineCount: number;
+      newLineCount: number;
     }
   | {status: "preview"; fromSerial: string; toSerial: string; unitCost: number; costSource: "movement" | "average"}
   | {status: "already_transformed"}
@@ -110,8 +113,11 @@ export type TransformResponse =
   // happened": never retry on this, since Cin7 has no idempotency key and a
   // retry would double-adjust stock. `taskId` lets staff trace the write in
   // Cin7 by hand.
-  | {status: "written_unconfirmed"; taskId: string | null}
-  | {status: "error"; code: string};
+  | {status: "written_unconfirmed"; taskId: string | null; existingLineCount: number; newLineCount: number}
+  // `phase` distinguishes a failed pre-write lookup (nothing written, safe
+  // to retry) from a failure during the write itself (may have written,
+  // never retry) — see Cin7Error's phase comment server-side.
+  | {status: "error"; code: string; phase: "read" | "write"};
 
 export async function postSerialTransform(input: {
   sku: string;
@@ -120,6 +126,10 @@ export async function postSerialTransform(input: {
   direction: TransformDirection;
   dryRun?: boolean;
 }): Promise<TransformResponse> {
+  // A dry run can never reach the server's write call (it returns "preview"
+  // before that), so any failure on one is read-phase by definition,
+  // regardless of what the server says or whether it was even reached.
+  const isDryRun = input.dryRun === true;
   try {
     const response = await fetch("/api/pos/serial-transform", {
       method: "POST",
@@ -127,12 +137,16 @@ export async function postSerialTransform(input: {
       body: JSON.stringify(input),
     });
     if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as {error?: string};
-      return {status: "error", code: body.error ?? `HTTP_${response.status}`};
+      const body = (await response.json().catch(() => ({}))) as {error?: string; phase?: string};
+      // Trust the server's tag when it says "read"; otherwise default to the
+      // more cautious "write" — fail closed, since an ambiguous failure is
+      // exactly when staff must not be told a retry is safe.
+      const phase: "read" | "write" = isDryRun || body.phase === "read" ? "read" : "write";
+      return {status: "error", code: body.error ?? `HTTP_${response.status}`, phase};
     }
     return (await response.json()) as TransformResponse;
   } catch {
-    return {status: "error", code: "NETWORK"};
+    return {status: "error", code: "NETWORK", phase: isDryRun ? "read" : "write"};
   }
 }
 

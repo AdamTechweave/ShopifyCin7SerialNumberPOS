@@ -60,7 +60,17 @@ export interface Cin7Movement {
 export type Cin7ErrorCode = "RATE_LIMITED" | "UNREACHABLE" | "AUTH_FAILED" | "BAD_RESPONSE";
 
 export class Cin7Error extends Error {
-  constructor(public code: Cin7ErrorCode, message: string) {
+  /**
+   * Defaults to "read": every `request()` call site except
+   * `createStockAdjustment` is a pre-write lookup, so an error thrown there
+   * provably could not have written anything. `createStockAdjustment`
+   * re-tags its own errors "write" below — that's the one call that can.
+   */
+  constructor(
+    public code: Cin7ErrorCode,
+    message: string,
+    public phase: "read" | "write" = "read",
+  ) {
     super(message);
     this.name = "Cin7Error";
   }
@@ -146,7 +156,17 @@ export class Cin7Client {
   }
 
   async createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResponse> {
-    return this.request<StockAdjustmentResponse>("POST", "stockadjustment", {body: payload});
+    try {
+      return await this.request<StockAdjustmentResponse>("POST", "stockadjustment", {body: payload});
+    } catch (error) {
+      // This is the one call that can actually write. Re-tag rather than let
+      // the "read" default through: a failure here means the write may have
+      // gone to Cin7 even without a usable response (see `TransformService`'s
+      // no-retry comment on this call), and callers need to tell that apart
+      // from a failed pre-write lookup.
+      if (error instanceof Cin7Error) throw new Cin7Error(error.code, error.message, "write");
+      throw error;
+    }
   }
 
   async getProductWithMovements(

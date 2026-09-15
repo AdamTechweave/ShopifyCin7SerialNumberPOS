@@ -33,6 +33,13 @@ interface Outcome {
   tone: "success" | "warning" | "critical";
   heading: string;
   message: string;
+  /**
+   * Plain, factual supplementary line — currently just the Cin7
+   * ExistingStockLines/NewStockLines split on `ok`/`written_unconfirmed`.
+   * Kept out of `message` so the primary sentence stays the same wording
+   * whether or not this is available.
+   */
+  detail?: string;
 }
 
 // `computeTargetSerial`'s three failure reasons are exactly three members of
@@ -67,6 +74,7 @@ function describeOutcome(response: TransformResponse, ctx: {serial: string; targ
         tone: "success",
         heading: "Transform complete",
         message: `${response.fromSerial} is now ${response.toSerial}.`,
+        detail: `Cin7 lines: ${response.existingLineCount} existing, ${response.newLineCount} new`,
       };
     case "preview":
       // The confirm step consumes "preview" itself to render the confirm
@@ -150,13 +158,26 @@ function describeOutcome(response: TransformResponse, ctx: {serial: string; targ
         message: `The adjustment was sent to Cin7 but couldn't be confirmed. Do not retry — check Cin7 task ${
           response.taskId ?? "(task id unavailable)"
         } to see whether ${ctx.target} was created.`,
+        detail: `Cin7 lines: ${response.existingLineCount} existing, ${response.newLineCount} new`,
       };
     case "error":
-      return {
-        tone: "critical",
-        heading: "Transform failed",
-        message: `Transform failed (${response.code}). Check Cin7 before trying again — the adjustment may have been written.`,
-      };
+      // `phase` distinguishes a failed pre-write lookup (nothing written,
+      // safe to retry) from a failure during the write itself (may have
+      // written, never retry) — see Cin7Error's phase comment server-side.
+      // A dry-run failure is always "read": the server can't reach its
+      // write call on a dry run, and the client forces it too when this
+      // never even reached the server (see postSerialTransform).
+      return response.phase === "read"
+        ? {
+            tone: "warning",
+            heading: "Couldn't reach Cin7",
+            message: `The check failed (${response.code}). Nothing was written — safe to try again.`,
+          }
+        : {
+            tone: "critical",
+            heading: "Transform failed",
+            message: `Transform failed (${response.code}). Check Cin7 before trying again — the adjustment may have been written.`,
+          };
     default: {
       // Assigning to a `never`-typed binding — and then actually reading it
       // below — is what makes this fail closed twice over: at compile time,
@@ -179,16 +200,17 @@ function describeOutcome(response: TransformResponse, ctx: {serial: string; targ
 // pick list is a cached read (serials.server.ts, up to 45s stale) that the
 // server best-effort invalidates after a non-dry-run attempt — but that
 // invalidation happens for every non-dry-run outcome, not just these, so it
-// cannot tell us here which responses are safe. Only the guards below are:
-// every one of them fires before Cin7 is ever touched for a write, whether
+// cannot tell us here which responses are safe. Only the guards below (and
+// a read-phase "error") are: every one of them fires — or, for "error",
+// provably failed — before Cin7 is ever touched for a write, whether
 // detected locally (no network call at all) or returned by the real commit
 // call itself (the server checks every guard before writing). `ok`,
-// `written_unconfirmed`, and `error` all mean a write may have happened, and
-// `preview`/unrecognized statuses reaching a *result* are already anomalies
-// — none of those are safe to imply "pick another serial" against the same
-// list.
-function nothingWasWritten(status: TransformResponse["status"]): boolean {
-  switch (status) {
+// `written_unconfirmed`, and a write-phase "error" all mean a write may
+// have happened, and `preview`/unrecognized statuses reaching a *result*
+// are already anomalies — none of those are safe to imply "pick another
+// serial" against the same list.
+function nothingWasWritten(response: TransformResponse): boolean {
+  switch (response.status) {
     case "already_transformed":
     case "not_transformed":
     case "too_long":
@@ -200,6 +222,8 @@ function nothingWasWritten(status: TransformResponse["status"]): boolean {
     case "target_exists":
     case "cost_unresolved":
       return true;
+    case "error":
+      return response.phase === "read";
     default:
       return false;
   }
@@ -361,7 +385,8 @@ export function SerialTransform({onDone}: Props) {
         <s-banner tone={outcome.tone} heading={outcome.heading}>
           {outcome.message}
         </s-banner>
-        {nothingWasWritten(step.response.status) && (
+        {outcome.detail && <s-text>{outcome.detail}</s-text>}
+        {nothingWasWritten(step.response) && (
           <s-button onClick={() => setStep({name: "pick"})}>Pick another serial</s-button>
         )}
         <s-button onClick={onDone}>Done</s-button>
@@ -433,6 +458,7 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
         <s-banner tone={outcome.tone} heading={outcome.heading}>
           {outcome.message}
         </s-banner>
+        {outcome.detail && <s-text>{outcome.detail}</s-text>}
         <s-button onClick={onBack}>Back</s-button>
       </s-page>
     );

@@ -43,6 +43,7 @@ describe("TransformService.transform", () => {
     expect(result).toEqual({
       status: "ok", fromSerial: "BIKE001", toSerial: "A-BIKE001",
       unitCost: 450, costSource: "average", taskId: "task-1",
+      existingLineCount: 1, newLineCount: 1,
     });
 
     expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
@@ -218,13 +219,13 @@ describe("TransformService.transform", () => {
       createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-2", NewStockLines: [], ExistingStockLines: [{}]}),
     });
     const result = await svc(client).transform(input);
-    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-2"});
+    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-2", existingLineCount: 1, newLineCount: 0});
   });
 
   it("written_unconfirmed carries a null taskId when Cin7 gives no TaskID either", async () => {
     const client = makeClient({createStockAdjustment: vi.fn().mockResolvedValue({})});
     const result = await svc(client).transform(input);
-    expect(result).toEqual({status: "written_unconfirmed", taskId: null});
+    expect(result).toEqual({status: "written_unconfirmed", taskId: null, existingLineCount: 0, newLineCount: 0});
   });
 
   it("written_unconfirmed treats a truthy but non-array NewStockLines as no evidence", async () => {
@@ -232,7 +233,32 @@ describe("TransformService.transform", () => {
       createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-3", NewStockLines: {} as unknown}),
     });
     const result = await svc(client).transform(input);
-    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-3"});
+    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-3", existingLineCount: 0, newLineCount: 0});
+  });
+
+  // The spec calls for asserting on the ExistingStockLines/NewStockLines
+  // split as confirmation Cin7 read our intent correctly — not just whether
+  // NewStockLines is non-empty. Surfaced to staff on the result screen
+  // rather than turned into a hard guard: a Cin7 misclassification (e.g. the
+  // zeroed source line counted as "new" instead of "existing") would make
+  // this a false negative and fail every transform, which is worse than a
+  // visible-but-unenforced count.
+  it("carries the ExistingStockLines/NewStockLines counts through on success", async () => {
+    const client = makeClient({
+      createStockAdjustment: vi.fn().mockResolvedValue({
+        TaskID: "task-9", NewStockLines: [{}, {}], ExistingStockLines: [{}],
+      }),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toMatchObject({status: "ok", existingLineCount: 1, newLineCount: 2});
+  });
+
+  it("counts a missing or non-array ExistingStockLines as zero", async () => {
+    const client = makeClient({
+      createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-9", NewStockLines: [{}]}),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toMatchObject({status: "ok", existingLineCount: 0, newLineCount: 1});
   });
 
   it("writes nothing on a dry run", async () => {
@@ -252,6 +278,7 @@ describe("TransformService.transform", () => {
     expect(result).toEqual({
       status: "ok", fromSerial: "A-BIKE001", toSerial: "BIKE001",
       unitCost: 450, costSource: "average", taskId: "task-1",
+      existingLineCount: 1, newLineCount: 1,
     });
 
     expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);

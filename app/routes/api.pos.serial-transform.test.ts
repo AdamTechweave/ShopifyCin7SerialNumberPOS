@@ -123,12 +123,20 @@ describe("POST /api/pos/serial-transform", () => {
     expect(transform).not.toHaveBeenCalled();
   });
 
-  it("maps a Cin7Error to 502", async () => {
+  it("maps a Cin7Error to 502, carrying its phase through", async () => {
     const {Cin7Error} = await import("../services/cin7.server");
     transform.mockRejectedValue(new Cin7Error("RATE_LIMITED", "429"));
     const res = await post(VALID);
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({error: "RATE_LIMITED"});
+    expect(await res.json()).toEqual({error: "RATE_LIMITED", phase: "read"});
+  });
+
+  it("carries a write-phase Cin7Error through as write, not the default read", async () => {
+    const {Cin7Error} = await import("../services/cin7.server");
+    transform.mockRejectedValue(new Cin7Error("UNREACHABLE", "timeout", "write"));
+    const res = await post(VALID);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({error: "UNREACHABLE", phase: "write"});
   });
 
   // A non-dry-run attempt may have changed Cin7 stock, so the serial-list
