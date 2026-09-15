@@ -1,5 +1,6 @@
 import type {AvailableSerial} from "./serials";
 import {SERIAL_TAG, toProductGid, buildSerializedMap} from "./tags";
+import type {TransformDirection} from "./transform";
 
 const tagCache = new Map<string, boolean>();
 
@@ -77,5 +78,74 @@ export async function fetchSerials(sku: string): Promise<SerialLookup> {
     return (await response.json()) as SerialLookup;
   } catch {
     return {status: "error", code: "NETWORK"};
+  }
+}
+
+// Mirrors `TransformResult` in app/services/serial-transform.server.ts, plus
+// the client-only `error` member — the same split `SerialLookup` makes on
+// top of the server's `SerialLookupResult`. Keep this in sync with the
+// server union; the screens switch on every member.
+export type TransformResponse =
+  | {
+      status: "ok";
+      fromSerial: string;
+      toSerial: string;
+      unitCost: number;
+      costSource: "movement" | "average";
+      taskId: string | null;
+    }
+  | {status: "preview"; fromSerial: string; toSerial: string; unitCost: number; costSource: "movement" | "average"}
+  | {status: "already_transformed"}
+  | {status: "not_transformed"}
+  | {status: "too_long"}
+  | {status: "empty_target_serial"}
+  | {status: "unknown_location"}
+  | {status: "serial_not_found"}
+  | {status: "not_single_unit"}
+  | {status: "serial_allocated"}
+  | {status: "target_exists"}
+  | {status: "cost_unresolved"}
+  // The write already succeeded — Cin7 accepted the adjustment — but the
+  // response carried no evidence the target serial was created. Not "nothing
+  // happened": never retry on this, since Cin7 has no idempotency key and a
+  // retry would double-adjust stock. `taskId` lets staff trace the write in
+  // Cin7 by hand.
+  | {status: "written_unconfirmed"; taskId: string | null}
+  | {status: "error"; code: string};
+
+export async function postSerialTransform(input: {
+  sku: string;
+  serial: string;
+  locationId: string;
+  direction: TransformDirection;
+  dryRun?: boolean;
+}): Promise<TransformResponse> {
+  try {
+    const response = await fetch("/api/pos/serial-transform", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as {error?: string};
+      return {status: "error", code: body.error ?? `HTTP_${response.status}`};
+    }
+    return (await response.json()) as TransformResponse;
+  } catch {
+    return {status: "error", code: "NETWORK"};
+  }
+}
+
+/**
+ * The product-details targets give a variantId, but the serials endpoint keys
+ * off SKU. `fetchProductVariantWithId` is an on-device POS lookup — no network
+ * cost to us — and `sku` is optional on the variant.
+ */
+export async function fetchVariantSku(variantId: number): Promise<string | null> {
+  try {
+    const variant = await shopify.productSearch.fetchProductVariantWithId(variantId);
+    return variant?.sku ?? null;
+  } catch {
+    return null;
   }
 }
