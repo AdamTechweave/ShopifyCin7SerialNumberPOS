@@ -23,7 +23,16 @@ export type TransformResult =
   | {status: "serial_allocated"}
   | {status: "target_exists"}
   | {status: "cost_unresolved"}
-  | {status: "write_unconfirmed"; taskId: string | null};
+  /**
+   * The write already succeeded at the HTTP level by the time this is
+   * returned — Cin7 accepted `createStockAdjustment` — but the response
+   * carried no evidence (a non-empty `NewStockLines`) that the target
+   * serial was actually created. Never retry on this: retrying re-sends an
+   * adjustment Cin7 may have already applied, and Cin7 has neither an
+   * idempotency key nor serial-uniqueness checking to catch the duplicate.
+   * Find and verify the adjustment in Cin7 by `taskId` instead.
+   */
+  | {status: "written_unconfirmed"; taskId: string | null};
 
 /**
  * Stable, human-legible reference for the stock adjustment. Not used for
@@ -147,9 +156,11 @@ export class TransformService {
     // Cin7 might merge or reject two lines that differ only by BatchSN — a
     // 2xx alone doesn't prove the target serial was actually created. Require
     // evidence of a new stock line before reporting success back to staff,
-    // since there is no undo against a real warehouse.
-    const newLines = response.NewStockLines ?? [];
-    if (newLines.length === 0) return {status: "write_unconfirmed", taskId};
+    // since there is no undo against a real warehouse. Array.isArray guards
+    // against a truthy-but-non-array NewStockLines, whose `.length` would be
+    // `undefined` and would otherwise be treated as confirmed.
+    const hasNewStockLine = Array.isArray(response.NewStockLines) && response.NewStockLines.length > 0;
+    if (!hasNewStockLine) return {status: "written_unconfirmed", taskId};
 
     return {
       status: "ok",

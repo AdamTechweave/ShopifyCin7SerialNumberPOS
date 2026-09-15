@@ -185,18 +185,26 @@ describe("TransformService.transform", () => {
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
   });
 
-  it("reports write_unconfirmed when Cin7 gives no evidence of a new stock line", async () => {
+  it("reports written_unconfirmed when Cin7 gives no evidence of a new stock line", async () => {
     const client = makeClient({
       createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-2", NewStockLines: [], ExistingStockLines: [{}]}),
     });
     const result = await svc(client).transform(input);
-    expect(result).toEqual({status: "write_unconfirmed", taskId: "task-2"});
+    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-2"});
   });
 
-  it("write_unconfirmed carries a null taskId when Cin7 gives no TaskID either", async () => {
+  it("written_unconfirmed carries a null taskId when Cin7 gives no TaskID either", async () => {
     const client = makeClient({createStockAdjustment: vi.fn().mockResolvedValue({})});
     const result = await svc(client).transform(input);
-    expect(result).toEqual({status: "write_unconfirmed", taskId: null});
+    expect(result).toEqual({status: "written_unconfirmed", taskId: null});
+  });
+
+  it("written_unconfirmed treats a truthy but non-array NewStockLines as no evidence", async () => {
+    const client = makeClient({
+      createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-3", NewStockLines: {} as unknown}),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "written_unconfirmed", taskId: "task-3"});
   });
 
   it("writes nothing on a dry run", async () => {
