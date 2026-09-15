@@ -226,11 +226,7 @@ export function SerialTransform({onDone}: Props) {
   const handleSelect = useCallback((s: AvailableSerial) => {
     const direction = directionFor(s.serial);
     const targetResult = computeTargetSerial(s.serial, direction);
-    // `=== false`, not `!targetResult.ok`: this extension's tsconfig runs
-    // without strictNullChecks, and TS only narrows this boolean-discriminated
-    // union on an explicit equality check — negation leaves `targetResult`
-    // as the full union below, so `.reason` doesn't typecheck.
-    if (targetResult.ok === false) {
+    if (!targetResult.ok) {
       // Detected locally — no network call for an action that can never
       // succeed (e.g. a serial too long to prefix).
       setStep({
