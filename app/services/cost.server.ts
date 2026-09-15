@@ -11,9 +11,11 @@ export type CostResult =
   | {ok: false};
 
 /**
- * An unparseable `Date` is treated as the oldest possible movement (rather
- * than `NaN`, which would corrupt the sort) so it sorts last in preference —
- * it is never chosen over a movement with a valid date.
+ * An unparseable `Date` is treated as the oldest possible movement so it
+ * sorts last in preference — it is never chosen over a movement with a
+ * valid date. `-Infinity` alone isn't enough to keep the comparator clean:
+ * `-Infinity - (-Infinity)` is `NaN`, so two unparseable dates must be
+ * compared explicitly rather than by subtracting `parsedTime` results.
  */
 function parsedTime(date: string): number {
   const t = Date.parse(date);
@@ -41,7 +43,12 @@ export function resolveUnitCost(
   // the sort, so the sort only ever sees the matching subset.
   const inbound = movements
     .filter((m) => String(m.BatchSN) === serial && m.Location === locationName && m.Quantity > 0)
-    .sort((a, b) => parsedTime(b.Date) - parsedTime(a.Date));
+    .sort((a, b) => {
+      const ta = parsedTime(a.Date);
+      const tb = parsedTime(b.Date);
+      if (ta === tb) return 0;
+      return tb > ta ? 1 : -1;
+    });
 
   // Walk newest-first and take the first movement that yields usable
   // evidence — a bad value (zero, negative, non-finite) on the most recent

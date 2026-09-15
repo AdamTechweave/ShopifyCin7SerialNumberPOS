@@ -60,11 +60,22 @@ describe("resolveUnitCost", () => {
     expect(resolveUnitCost(product, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 400, source: "movement"});
   });
 
-  it("sorts by parsed date rather than string comparison across ISO forms", () => {
-    const product = {Movements: [
-      movement({Amount: 400, Date: "2026-01-01T00:00:00"}),
-      movement({Amount: 500, Date: "2026-06-01T00:00:00Z"}),
+  it("orders by real time, not string order, across timezone offsets", () => {
+    const product = {AverageCost: 999, Movements: [
+      movement({Date: "2026-01-02T00:30:00+02:00", Amount: 100, Quantity: 1}), // 22:30 UTC
+      movement({Date: "2026-01-01T23:00:00Z", Amount: 250, Quantity: 1}),      // 23:00 UTC — genuinely later
     ]};
-    expect(resolveUnitCost(product, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 500, source: "movement"});
+    expect(resolveUnitCost(product, "BIKE001", "Main Warehouse"))
+      .toEqual({ok: true, unitCost: 250, source: "movement"});
+  });
+
+  it("treats unparseable dates as equally oldest without breaking the sort", () => {
+    const product = {AverageCost: 999, Movements: [
+      movement({Date: "not-a-date", Amount: 111}),
+      movement({Date: "also-not-a-date", Amount: 222}),
+      movement({Date: "2026-01-01T00:00:00Z", Amount: 333}),
+    ]};
+    expect(resolveUnitCost(product, "BIKE001", "Main Warehouse"))
+      .toEqual({ok: true, unitCost: 333, source: "movement"});
   });
 });
