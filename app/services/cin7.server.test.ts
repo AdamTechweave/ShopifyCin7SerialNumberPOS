@@ -81,4 +81,46 @@ describe("Cin7Client", () => {
     const client = new Cin7Client("acct", "key", fetchFn);
     await expect(client.getAvailability("WIDGET-001")).rejects.toMatchObject({code: "UNREACHABLE"});
   });
+
+  it("posts a stock adjustment with both lines and UpdateOnHand set", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({TaskID: "task-1", NewStockLines: [], ExistingStockLines: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+
+    await client.createStockAdjustment({
+      EffectiveDate: "2026-09-15T00:00:00.000",
+      Status: "COMPLETED",
+      Reference: "POS-SERIAL-XFORM:BIKE:BIKE001:A-BIKE001:2026-09-15",
+      Comment: "Assembled BIKE001 -> A-BIKE001",
+      UpdateOnHand: true,
+      Lines: [
+        {SKU: "BIKE", BatchSN: "BIKE001", Quantity: 0, UnitCost: 450, Location: "Main Warehouse"},
+        {SKU: "BIKE", BatchSN: "A-BIKE001", Quantity: 1, UnitCost: 450, Location: "Main Warehouse"},
+      ],
+    });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toContain("/ExternalApi/v2/stockadjustment");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body);
+    expect(body.UpdateOnHand).toBe(true);
+    expect(body.Status).toBe("COMPLETED");
+    expect(body.Lines[0]).toMatchObject({BatchSN: "BIKE001", Quantity: 0});
+    expect(body.Lines[1]).toMatchObject({BatchSN: "A-BIKE001", Quantity: 1});
+  });
+
+  it("requests product movements for cost lookup", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Products: [{AverageCost: 12, Movements: []}]}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await client.getProductWithMovements("BIKE");
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain("/ExternalApi/v2/product");
+    expect(url).toContain("Sku=BIKE");
+    expect(url).toContain("IncludeMovements=true");
+  });
+
+  it("returns an empty product shape when Cin7 knows no such SKU", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Products: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    expect(await client.getProductWithMovements("NOPE")).toEqual({});
+  });
 });

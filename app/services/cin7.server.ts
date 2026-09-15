@@ -17,6 +17,41 @@ export interface Cin7AvailabilityRow {
   NextDeliveryDate: string | null;
 }
 
+export interface StockAdjustmentLine {
+  SKU: string;
+  BatchSN: string;
+  /** Cin7 treats this as the NEW absolute QuantityOnHand, not a delta. */
+  Quantity: number;
+  UnitCost: number;
+  Location: string;
+}
+
+export interface StockAdjustmentPayload {
+  EffectiveDate: string;
+  Status: "COMPLETED";
+  Reference: string;
+  Comment: string;
+  /** Defaults to false in Cin7, which adjusts *available* rather than *on hand*. */
+  UpdateOnHand: true;
+  Lines: StockAdjustmentLine[];
+}
+
+export interface StockAdjustmentResponse {
+  TaskID?: string;
+  ExistingStockLines?: unknown[];
+  NewStockLines?: unknown[];
+}
+
+export interface Cin7Movement {
+  BatchSN: string | null;
+  Location: string;
+  Quantity: number;
+  /** Cost of the moved goods, per Cin7's docs. */
+  Amount: number;
+  Date: string;
+  Type: string;
+}
+
 export type Cin7ErrorCode = "RATE_LIMITED" | "UNREACHABLE" | "AUTH_FAILED" | "BAD_RESPONSE";
 
 export class Cin7Error extends Error {
@@ -92,5 +127,18 @@ export class Cin7Client {
   async skuExists(sku: string): Promise<boolean> {
     const data = await this.get<{Products?: unknown[]}>("product", {Sku: sku, Page: "1", Limit: "1"});
     return (data.Products?.length ?? 0) > 0;
+  }
+
+  async createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResponse> {
+    return this.request<StockAdjustmentResponse>("POST", "stockadjustment", {body: payload});
+  }
+
+  async getProductWithMovements(
+    sku: string,
+  ): Promise<{AverageCost?: number; Movements?: Cin7Movement[]}> {
+    const data = await this.request<{
+      Products?: Array<{AverageCost?: number; Movements?: Cin7Movement[]}>;
+    }>("GET", "product", {params: {Sku: sku, IncludeMovements: "true", Page: "1", Limit: "1"}});
+    return data.Products?.[0] ?? {};
   }
 }
