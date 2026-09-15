@@ -1,4 +1,4 @@
-import {Cin7Client} from "./cin7.server";
+import {Cin7Client, type Cin7AvailabilityRow} from "./cin7.server";
 import {computeTargetSerial, type TransformDirection} from "./transform.server";
 import {resolveUnitCost} from "./cost.server";
 import {getConfig} from "../config.server";
@@ -52,6 +52,12 @@ export class TransformService {
   }): Promise<TransformResult> {
     const {sku, serial, shopifyLocationId, direction, dryRun} = input;
 
+    // Guard 0: cheap, local. Cin7 uses a blank Batch to mean "not
+    // serial/batch tracked", not a real serial — without this, an empty
+    // `serial` on assemble computes a target of just the bare prefix and can
+    // match a blank-Batch row on the raw-rows filters below.
+    if (serial === "") return {status: "serial_not_found"};
+
     // Guard 1: cheap, local, no Cin7 call — must short-circuit before any I/O.
     const target = computeTargetSerial(serial, direction);
     if (!target.ok) return {status: target.reason};
@@ -74,27 +80,40 @@ export class TransformService {
     // which would hide (a) a batch-tracked lot or otherwise multi-unit row
     // that still has stock available, and (b) a fully-allocated existing
     // target serial (Available: 0) — both of which the guards below must be
-    // able to see. Cin7's BatchSN can arrive as a JSON number for a purely
+    // able to see. We do restore groupSerials' null/"" Batch filter, though:
+    // Cin7 uses a blank Batch for non-tracked stock, never for a real
+    // serial. Cin7's BatchSN can also arrive as a JSON number for a purely
     // numeric serial (see cost.server.ts), so compare via String(r.Batch).
     const rows = await this.client.getAvailability(sku);
+    const isTrackedAt = (r: Cin7AvailabilityRow, target: string) =>
+      r.Batch !== null && r.Batch !== "" && String(r.Batch) === target && r.Location === locationName;
 
-    const sourceRows = rows.filter((r) => String(r.Batch) === serial && r.Location === locationName);
+    // Cin7 enforces no serial uniqueness, so the same serial can legitimately
+    // appear as more than one row at a location (e.g. split across bins).
+    // Guard on the SUM across all matching rows, not just rows[0] — taking
+    // only the first row would let two rows of OnHand: 1 each pass the
+    // single-unit check while the location actually holds 2 units, and the
+    // write below would zero both while recreating only one.
+    const sourceRows = rows.filter((r) => isTrackedAt(r, serial));
     if (sourceRows.length === 0) return {status: "serial_not_found"};
-    const source = sourceRows[0];
 
     // The write below sends Quantity: 0 for the source line, which Cin7
     // treats as an ABSOLUTE new OnHand, not a delta — it zeroes whatever is
     // on hand. Refuse anything but a single, fully unallocated unit so the
     // write can never destroy more than the one unit it is renaming, and
     // never orphan an allocation an open order is depending on.
-    if (source.OnHand !== 1) return {status: "not_single_unit"};
-    if (source.Allocated !== 0) return {status: "serial_allocated"};
+    const totalOnHand = sourceRows.reduce((n, r) => n + r.OnHand, 0);
+    const totalAllocated = sourceRows.reduce((n, r) => n + r.Allocated, 0);
+    if (totalOnHand !== 1) return {status: "not_single_unit"};
+    if (totalAllocated !== 0) return {status: "serial_allocated"};
 
     // target_exists is our only defence against duplicate serials — Cin7
     // enforces no uniqueness of its own — so this must catch a target
     // serial even when it is fully allocated (Available: 0) at this
-    // location, which is why it runs against the raw rows too.
-    const targetExists = rows.some((r) => String(r.Batch) === toSerial && r.Location === locationName);
+    // location, which is why it runs against the raw rows too. Scoped to
+    // this location deliberately: Cin7 permits the same serial at another
+    // location, and our uniqueness guarantee is per-location, not global.
+    const targetExists = rows.some((r) => isTrackedAt(r, toSerial));
     if (targetExists) return {status: "target_exists"};
 
     // Guard 5: resolve cost before committing to a write; refuse rather than guess.

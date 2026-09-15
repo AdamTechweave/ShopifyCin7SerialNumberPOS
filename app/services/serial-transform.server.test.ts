@@ -105,6 +105,44 @@ describe("TransformService.transform", () => {
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
   });
 
+  it("refuses when two rows at the same location share the source serial — Cin7 enforces no uniqueness", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([
+        stockRow("BIKE001", {onHand: 1, allocated: 0, available: 1}),
+        stockRow("BIKE001", {onHand: 1, allocated: 0, available: 1}),
+      ]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "not_single_unit"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty serial before any Cin7 call, even with a blank-Batch row present", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([stockRow("", {onHand: 1, allocated: 0, available: 1})]),
+    });
+    const result = await svc(client).transform({...input, serial: ""});
+    expect(result).toEqual({status: "serial_not_found"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+    expect(client.getAvailability).not.toHaveBeenCalled();
+  });
+
+  it("matches a numeric BatchSN against a string serial — Cin7 can return BatchSN as a JSON number", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([{...row("x"), Batch: 12345}]),
+    });
+    const result = await svc(client).transform({...input, serial: "12345"});
+    expect(result).toMatchObject({status: "ok", fromSerial: "12345", toSerial: "A-12345"});
+    expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses shopifyLocationId \"constructor\" rather than resolving an inherited Object.prototype value", async () => {
+    const client = makeClient();
+    const result = await svc(client).transform({...input, shopifyLocationId: "constructor"});
+    expect(result).toEqual({status: "unknown_location"});
+    expect(client.getAvailability).not.toHaveBeenCalled();
+  });
+
   it("refuses when the target serial already exists — Cin7 does not enforce uniqueness", async () => {
     const client = makeClient({getAvailability: vi.fn().mockResolvedValue([row("BIKE001"), row("A-BIKE001")])});
     const result = await svc(client).transform(input);
@@ -122,6 +160,15 @@ describe("TransformService.transform", () => {
     const result = await svc(client).transform(input);
     expect(result).toEqual({status: "target_exists"});
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("allows the transform when the target serial exists only at a different location", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([row("BIKE001"), row("A-BIKE001", "Wellington")]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toMatchObject({status: "ok", fromSerial: "BIKE001", toSerial: "A-BIKE001"});
+    expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a disassemble that would produce an empty serial, without calling Cin7", async () => {
