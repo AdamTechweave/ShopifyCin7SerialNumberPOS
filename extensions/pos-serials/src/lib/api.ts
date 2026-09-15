@@ -131,9 +131,15 @@ export async function postSerialTransform(input: {
   // regardless of what the server says or whether it was even reached.
   const isDryRun = input.dryRun === true;
   try {
+    // No Content-Type header, deliberately: setting one makes this a
+    // non-simple cross-origin request, which mandates an OPTIONS preflight
+    // — and this app has no OPTIONS handler, so a preflight would 405
+    // before any route module runs. Without it, fetch sends a string body
+    // as text/plain, which stays a simple request and never preflights.
+    // request.json() on the server parses the body regardless of the
+    // Content-Type it arrives with, so nothing else here depends on it.
     const response = await fetch("/api/pos/serial-transform", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
       body: JSON.stringify(input),
     });
     if (!response.ok) {
