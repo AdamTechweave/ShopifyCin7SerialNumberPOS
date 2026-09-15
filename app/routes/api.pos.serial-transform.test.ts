@@ -4,6 +4,10 @@ const transform = vi.fn();
 vi.mock("../services/serial-transform.server", () => ({
   getTransformService: () => ({transform}),
 }));
+const invalidate = vi.fn();
+vi.mock("../services/serials.server", () => ({
+  getSerialService: () => ({invalidate}),
+}));
 vi.mock("../shopify.server", () => ({
   authenticate: {public: {checkout: async () => ({cors: (r: Response) => r})}},
 }));
@@ -25,6 +29,7 @@ beforeEach(() => {
   // invoking it again after the test. With mockRejectedValue configured that
   // phantom call becomes an unawaited rejection that fails the test.
   transform.mockReset();
+  invalidate.mockReset();
 });
 
 describe("POST /api/pos/serial-transform", () => {
@@ -124,5 +129,51 @@ describe("POST /api/pos/serial-transform", () => {
     const res = await post(VALID);
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({error: "RATE_LIMITED"});
+  });
+
+  // A non-dry-run attempt may have changed Cin7 stock, so the serial-list
+  // cache for this SKU must not keep serving pre-write rows for the rest of
+  // its TTL. Invalidation is unconditional on status — not just "ok" — since
+  // a guard can equally fire on the real (non-dry-run) commit call, and a
+  // route that only invalidated on some statuses would need to enumerate
+  // the result union it otherwise deliberately doesn't.
+  describe("serial cache invalidation", () => {
+    it("invalidates the SKU's cache after a successful non-dry-run transform", async () => {
+      transform.mockResolvedValue({status: "ok", fromSerial: "BIKE001", toSerial: "A-BIKE001", unitCost: 450, costSource: "average", taskId: "t1"});
+      await post(VALID);
+      expect(invalidate).toHaveBeenCalledWith("BIKE");
+    });
+
+    it("invalidates the SKU's cache even when the non-dry-run result is a guard status", async () => {
+      transform.mockResolvedValue({status: "serial_not_found"});
+      await post(VALID);
+      expect(invalidate).toHaveBeenCalledWith("BIKE");
+    });
+
+    it("invalidates the SKU's cache when the write throws a Cin7Error", async () => {
+      const {Cin7Error} = await import("../services/cin7.server");
+      transform.mockRejectedValue(new Cin7Error("RATE_LIMITED", "429"));
+      await post(VALID);
+      expect(invalidate).toHaveBeenCalledWith("BIKE");
+    });
+
+    it("does not invalidate on a dry run that succeeds", async () => {
+      transform.mockResolvedValue({status: "preview", fromSerial: "BIKE001", toSerial: "A-BIKE001", unitCost: 450, costSource: "average"});
+      await post({...VALID, dryRun: true});
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it("does not invalidate on a dry run that throws a Cin7Error", async () => {
+      const {Cin7Error} = await import("../services/cin7.server");
+      transform.mockRejectedValue(new Cin7Error("RATE_LIMITED", "429"));
+      await post({...VALID, dryRun: true});
+      expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    it("does not invalidate when the request is rejected before reaching the service", async () => {
+      const res = await post({...VALID, direction: "sideways"});
+      expect(res.status).toBe(400);
+      expect(invalidate).not.toHaveBeenCalled();
+    });
   });
 });

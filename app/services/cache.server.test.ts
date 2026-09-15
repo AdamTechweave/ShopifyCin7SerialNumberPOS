@@ -15,4 +15,16 @@ describe("TtlCache", () => {
     const cache = new TtlCache<string>(500);
     expect(cache.get("missing")).toBeUndefined();
   });
+
+  it("delete removes a stored value immediately, before its TTL expires", () => {
+    const cache = new TtlCache<string>(500);
+    cache.set("k", "v");
+    cache.delete("k");
+    expect(cache.get("k")).toBeUndefined();
+  });
+
+  it("delete on a key that was never set is a no-op", () => {
+    const cache = new TtlCache<string>(500);
+    expect(() => cache.delete("missing")).not.toThrow();
+  });
 });

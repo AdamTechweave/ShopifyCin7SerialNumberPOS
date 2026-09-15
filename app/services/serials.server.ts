@@ -66,6 +66,16 @@ export class SerialService {
     }
     return exists ? {status: "no_stock"} : {status: "sku_not_found"};
   }
+
+  // Called after a serial transform's write attempt (see
+  // api.pos.serial-transform.tsx) so the next lookup for this SKU re-reads
+  // Cin7 instead of serving pre-write rows for up to AVAILABILITY_TTL_MS.
+  // Clears both caches: a transform can turn a previously out-of-stock SKU
+  // into one with stock (or vice versa), which skuExistsCache also gates.
+  invalidate(sku: string): void {
+    this.availabilityCache.delete(sku);
+    this.skuExistsCache.delete(sku);
+  }
 }
 
 let singleton: SerialService | undefined;

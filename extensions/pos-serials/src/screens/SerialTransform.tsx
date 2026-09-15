@@ -175,6 +175,36 @@ function describeOutcome(response: TransformResponse, ctx: {serial: string; targ
   }
 }
 
+// Whether a pick-list entry is still trustworthy after this result. The
+// pick list is a cached read (serials.server.ts, up to 45s stale) that the
+// server best-effort invalidates after a non-dry-run attempt — but that
+// invalidation happens for every non-dry-run outcome, not just these, so it
+// cannot tell us here which responses are safe. Only the guards below are:
+// every one of them fires before Cin7 is ever touched for a write, whether
+// detected locally (no network call at all) or returned by the real commit
+// call itself (the server checks every guard before writing). `ok`,
+// `written_unconfirmed`, and `error` all mean a write may have happened, and
+// `preview`/unrecognized statuses reaching a *result* are already anomalies
+// — none of those are safe to imply "pick another serial" against the same
+// list.
+function nothingWasWritten(status: TransformResponse["status"]): boolean {
+  switch (status) {
+    case "already_transformed":
+    case "not_transformed":
+    case "too_long":
+    case "empty_target_serial":
+    case "unknown_location":
+    case "serial_not_found":
+    case "not_single_unit":
+    case "serial_allocated":
+    case "target_exists":
+    case "cost_unresolved":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function directionFor(serial: string): TransformDirection {
   return serial.startsWith(TRANSFORM_PREFIX) ? "disassemble" : "assemble";
 }
@@ -331,7 +361,9 @@ export function SerialTransform({onDone}: Props) {
         <s-banner tone={outcome.tone} heading={outcome.heading}>
           {outcome.message}
         </s-banner>
-        <s-button onClick={() => setStep({name: "pick"})}>Pick another serial</s-button>
+        {nothingWasWritten(step.response.status) && (
+          <s-button onClick={() => setStep({name: "pick"})}>Pick another serial</s-button>
+        )}
         <s-button onClick={onDone}>Done</s-button>
       </s-page>
     );

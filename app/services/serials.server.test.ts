@@ -103,3 +103,38 @@ describe("SerialService.lookup", () => {
     expect(result).toMatchObject({status: "ok", currentLocationName: null});
   });
 });
+
+describe("SerialService.invalidate", () => {
+  const okRows = [row({Batch: "SN-001", Location: "Auckland"})];
+
+  it("clears the cached availability for that SKU, so the next lookup refetches", async () => {
+    const client = {getAvailability: vi.fn().mockResolvedValue(okRows), skuExists: vi.fn()};
+    const service = new SerialService(client as never, {});
+    await service.lookup("WIDGET-001", "123");
+    service.invalidate("WIDGET-001");
+    await service.lookup("WIDGET-001", "123");
+    expect(client.getAvailability).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the cached sku-exists result for that SKU too", async () => {
+    const client = {
+      getAvailability: vi.fn().mockResolvedValue([]),
+      skuExists: vi.fn().mockResolvedValue(false),
+    };
+    const service = new SerialService(client as never, {});
+    await service.lookup("NOT-IN-CIN7", "1");
+    service.invalidate("NOT-IN-CIN7");
+    await service.lookup("NOT-IN-CIN7", "1");
+    expect(client.skuExists).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not affect other SKUs' cached entries", async () => {
+    const client = {getAvailability: vi.fn().mockResolvedValue(okRows), skuExists: vi.fn()};
+    const service = new SerialService(client as never, {});
+    await service.lookup("WIDGET-001", "123");
+    await service.lookup("OTHER-SKU", "123");
+    service.invalidate("WIDGET-001");
+    await service.lookup("OTHER-SKU", "123");
+    expect(client.getAvailability).toHaveBeenCalledTimes(2);
+  });
+});
