@@ -41,14 +41,30 @@ describe("resolveUnitCost", () => {
     expect(resolveUnitCost({}, "BIKE001", "Main Warehouse")).toEqual({ok: false});
   });
 
-  it("abandons the movement scan rather than walk an unbounded history", () => {
-    const many = Array.from({length: 2001}, () => movement({BatchSN: "OTHER"}));
+  it("scans the full movement history rather than capping it", () => {
+    const many = Array.from({length: 3000}, () => movement({BatchSN: "OTHER"}));
     many.push(movement({Amount: 450}));
-    expect(resolveUnitCost({AverageCost: 75, Movements: many}, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 75, source: "average"});
+    expect(resolveUnitCost({AverageCost: 75, Movements: many}, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 450, source: "movement"});
   });
 
   it("matches a serial that arrives from Cin7 as a number", () => {
     const product = {AverageCost: 999, Movements: [movement({BatchSN: 12345 as unknown as string, Amount: 300, Quantity: 1})]};
     expect(resolveUnitCost(product, "12345", "Main Warehouse")).toEqual({ok: true, unitCost: 300, source: "movement"});
+  });
+
+  it("tries the next-most-recent movement when the newest fails the cost guard", () => {
+    const product = {AverageCost: 999, Movements: [
+      movement({Amount: 0, Date: "2026-06-01T00:00:00"}),
+      movement({Amount: 400, Date: "2026-01-01T00:00:00"}),
+    ]};
+    expect(resolveUnitCost(product, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 400, source: "movement"});
+  });
+
+  it("sorts by parsed date rather than string comparison across ISO forms", () => {
+    const product = {Movements: [
+      movement({Amount: 400, Date: "2026-01-01T00:00:00"}),
+      movement({Amount: 500, Date: "2026-06-01T00:00:00Z"}),
+    ]};
+    expect(resolveUnitCost(product, "BIKE001", "Main Warehouse")).toEqual({ok: true, unitCost: 500, source: "movement"});
   });
 });

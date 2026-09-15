@@ -6,12 +6,19 @@ import type {Cin7Movement} from "./cin7.server";
  * cost at all. Movements are the only per-serial cost data available.
  */
 
-/** Movement history is unbounded and has no BatchSN filter. Cap the scan. */
-export const MAX_MOVEMENTS_SCANNED = 2000;
-
 export type CostResult =
   | {ok: true; unitCost: number; source: "movement" | "average"}
   | {ok: false};
+
+/**
+ * An unparseable `Date` is treated as the oldest possible movement (rather
+ * than `NaN`, which would corrupt the sort) so it sorts last in preference —
+ * it is never chosen over a movement with a valid date.
+ */
+function parsedTime(date: string): number {
+  const t = Date.parse(date);
+  return Number.isNaN(t) ? -Infinity : t;
+}
 
 export function resolveUnitCost(
   product: {AverageCost?: number; Movements?: Cin7Movement[]},
@@ -20,21 +27,30 @@ export function resolveUnitCost(
 ): CostResult {
   const movements = product.Movements ?? [];
 
-  if (movements.length > 0 && movements.length <= MAX_MOVEMENTS_SCANNED) {
-    // Cin7's API Blueprint types BatchSN as Decimal while its own sample
-    // response quotes it as a string (and the New Stock Line Model types it
-    // String) — a purely numeric serial can arrive as a JSON number, so
-    // normalise both sides to string before comparing.
-    const inbound = movements
-      .filter((m) => String(m.BatchSN) === serial && m.Location === locationName && m.Quantity > 0)
-      .sort((a, b) => a.Date.localeCompare(b.Date));
+  // Scanning is unbounded deliberately: getProductWithMovements has already
+  // fetched and parsed the full payload by the time this runs, so a cap here
+  // would save no work — it would only silently and permanently degrade
+  // accuracy on exactly the high-traffic SKUs that most need serial-level
+  // precision. The real mitigation would be a server-side filter, but
+  // Cin7's `/product` endpoint takes no BatchSN query parameter.
+  //
+  // Cin7's API Blueprint types BatchSN as Decimal while its own sample
+  // response quotes it as a string (and the New Stock Line Model types it
+  // String) — a purely numeric serial can arrive as a JSON number, so
+  // normalise both sides to string before comparing. The filter runs before
+  // the sort, so the sort only ever sees the matching subset.
+  const inbound = movements
+    .filter((m) => String(m.BatchSN) === serial && m.Location === locationName && m.Quantity > 0)
+    .sort((a, b) => parsedTime(b.Date) - parsedTime(a.Date));
 
-    const latest = inbound[inbound.length - 1];
-    if (latest) {
-      const unitCost = latest.Amount / latest.Quantity;
-      if (Number.isFinite(unitCost) && unitCost > 0) {
-        return {ok: true, unitCost, source: "movement"};
-      }
+  // Walk newest-first and take the first movement that yields usable
+  // evidence — a bad value (zero, negative, non-finite) on the most recent
+  // movement is still worse evidence than an older real one, so don't drop
+  // straight to the product-wide average.
+  for (const m of inbound) {
+    const unitCost = m.Amount / m.Quantity;
+    if (Number.isFinite(unitCost) && unitCost > 0) {
+      return {ok: true, unitCost, source: "movement"};
     }
   }
 
