@@ -140,12 +140,25 @@ export async function postSerialTransform(input: {
  * The product-details targets give a variantId, but the serials endpoint keys
  * off SKU. `fetchProductVariantWithId` is an on-device POS lookup — no network
  * cost to us — and `sku` is optional on the variant.
+ *
+ * Three distinct outcomes collapse to `null` if this just returns
+ * `string | null`: the variant isn't found on-device, it has no SKU set, or
+ * the lookup itself failed. Those tell very different stories to staff (a
+ * device sync issue vs. a data-entry gap vs. a transient error), so callers
+ * get a discriminated result instead and choose their own copy.
  */
-export async function fetchVariantSku(variantId: number): Promise<string | null> {
+export type VariantSkuLookup =
+  | {status: "ok"; sku: string}
+  | {status: "no_sku"}
+  | {status: "not_found"}
+  | {status: "error"};
+
+export async function fetchVariantSku(variantId: number): Promise<VariantSkuLookup> {
   try {
     const variant = await shopify.productSearch.fetchProductVariantWithId(variantId);
-    return variant?.sku ?? null;
+    if (!variant) return {status: "not_found"};
+    return variant.sku ? {status: "ok", sku: variant.sku} : {status: "no_sku"};
   } catch {
-    return null;
+    return {status: "error"};
   }
 }
