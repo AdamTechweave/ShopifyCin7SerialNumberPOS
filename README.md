@@ -90,10 +90,12 @@ Five parts, one app per client:
      stock > 0, orders current location first.
    - `POST /api/pos/serial-transform` — the write path behind the serial transform
      feature (see **Serial transform** below). `Cin7Client`
-     (`app/services/cin7.server.ts`) is no longer read-only for this route: it gained
-     a `post<T>()` method alongside the existing `get<T>()`, both routed through a
-     shared `request<T>()` that also adds a 30-second `AbortSignal.timeout` to every
-     call (GET included — there was no timeout at all before this).
+     (`app/services/cin7.server.ts`) is no longer read-only for this route. Its
+     GET-only helper was generalised into a shared private `request<T>(method, …)`;
+     `get<T>()` now delegates to it and `createStockAdjustment` calls it directly with
+     `POST`. There is no separate `post<T>()`. `request<T>()` also adds a 30-second
+     `AbortSignal.timeout` to every call (GET included — there was no timeout at all
+     before this).
    Cin7 availability responses are cached in-process for 45 seconds per SKU to stay
    under Cin7's ~60 calls/minute rate limit; the serial-transform route invalidates
    that cache for the affected SKU after any non-dry-run attempt (see **Serial
@@ -146,6 +148,7 @@ extensions/
     src/lib/assignSerial.ts               # rollback-safe split + property write
     src/lib/api.ts                        # Cin7 backend fetch + direct Admin API tag query
     src/lib/tags.ts                       # SERIAL_TAG + product GID/serialized-map helpers
+    src/lib/outcome.ts                    # pure result-status -> staff-facing copy (fail-closed)
     src/lib/cartOps.ts                    # real POS cart ops + property-visibility wait
     src/lib/transform.ts                  # TRANSFORM_PREFIX + computeTargetSerial, mirrors app/services/transform.server.ts
 docs/superpowers/specs/2026-07-17-pos-serial-numbers-design.md   # v1 design doc
@@ -181,9 +184,10 @@ this use case. It is set explicitly on every request.
 
 **Cost is resolved, not asked for, and the transform refuses rather than guess.**
 `resolveUnitCost()` (`app/services/cost.server.ts`) tries, in order: (1) Cin7
-movements for the SKU, filtered to the matching `BatchSN` and `Location`, taking the
-most recent inbound movement's `Amount / Quantity`; (2) the product's `AverageCost`
-as a fallback. If neither yields a positive number, the transform returns
+movements for the SKU, filtered to the matching `BatchSN` and `Location`, walking them
+newest-first and taking the first whose `Amount / Quantity` is a positive finite number
+— so a zero or malformed recent movement is skipped rather than failing the lookup;
+(2) the product's `AverageCost` as a fallback. If neither yields a positive number, the transform returns
 `cost_unresolved` instead of guessing — a wrong cost silently corrupts inventory
 valuation. The resolved cost and which of the two sources produced it are shown to
 staff on the confirmation screen before they commit, not just recorded afterwards.
@@ -281,8 +285,8 @@ npm test
 ```
 
 This runs `vitest run` across both the app backend (`app/**/*.test.ts`) and the
-extensions (`extensions/**/src/**/*.test.{ts,js}`) in one pass — **146 tests across
-13 files**, currently all passing.
+extensions (`extensions/**/src/**/*.test.{ts,js}`) in one pass — **200 tests across
+14 files**, currently all passing.
 
 Typecheck everything with:
 

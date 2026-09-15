@@ -186,16 +186,25 @@ Request:
 {sku: string; serial: string; locationId: string; direction: "assemble" | "disassemble"; dryRun?: boolean}
 ```
 
-Response is a discriminated union mirroring `SerialLookupResult`'s house style:
+Response is a discriminated union mirroring `SerialLookupResult`'s house style. **Updated
+to as-built** — this grew from 8 members to 13 during implementation as review added
+guards, and `written_unconfirmed` in particular must appear here, since this block is the
+only place the spec enumerates outcomes and it is the never-retry status:
 ```ts
-| {status: "ok"; fromSerial: string; toSerial: string; unitCost: number; costSource: "movement" | "average"; taskId: string}
-| {status: "preview"; …same minus taskId}        // dryRun — builds the payload, posts nothing
-| {status: "already_transformed"}                 // serial already carries the prefix
-| {status: "not_transformed"}                     // un-transform on a serial without it
-| {status: "target_exists"}                       // new serial already at that location
+| {status: "ok"; fromSerial; toSerial; unitCost; costSource; taskId: string | null; existingLineCount; newLineCount}
+| {status: "preview"; fromSerial; toSerial; unitCost; costSource}   // dryRun — posts nothing
+| {status: "already_transformed"}     // serial already carries the prefix
+| {status: "not_transformed"}         // un-transform on a serial without it
+| {status: "too_long"}                // prefixing would exceed Cin7's 50-char BatchSN
+| {status: "empty_target_serial"}     // e.g. disassembling a serial that is just "A-"
+| {status: "unknown_location"}        // POS location not in CIN7_LOCATION_MAP
 | {status: "serial_not_found"}
+| {status: "not_single_unit"}         // not exactly one unit at this location
+| {status: "serial_allocated"}        // committed to an open order
+| {status: "target_exists"}           // new serial already at that location
 | {status: "cost_unresolved"}
-| {status: "error"; code: Cin7ErrorCode}
+| {status: "written_unconfirmed"; taskId: string | null; existingLineCount; newLineCount}
+| {status: "error"; code: Cin7ErrorCode; phase: "read" | "write"}   // client-side only
 ```
 
 **`dryRun` is deliberate — but note precisely what it does and does not prove.**
@@ -220,7 +229,7 @@ It runs every guard and resolves the cost without POSTing, returning
 `request<T>(method, path, {params, body})` preserving the existing status→`Cin7Error`
 mapping, and add:
 
-- `post<T>()` via that helper
+- `POST` support through that helper. (As built there is **no** separate `post<T>()`: `get<T>()` delegates to `request<T>()` and `createStockAdjustment` calls `request("POST", …)` directly.)
 - **`AbortSignal.timeout(30_000)` on every request.** There is no timeout today; a hung
   Cin7 response hangs the request indefinitely. Tolerable for a GET, dangerous
   mid-adjustment, where it leaves the outcome genuinely unknown.
