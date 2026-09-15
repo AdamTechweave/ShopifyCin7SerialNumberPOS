@@ -14,3 +14,11 @@ description = "Assign Cin7 serial numbers to serialized products at POS"
   [[extensions.targeting]]
   target = "pos.home.modal.render"
   module = "./src/Modal.tsx"
+
+  [[extensions.targeting]]
+  target = "pos.product-details.action.menu-item.render"
+  module = "./src/ProductMenuItem.tsx"
+
+  [[extensions.targeting]]
+  target = "pos.product-details.action.render"
+  module = "./src/ProductModal.tsx"

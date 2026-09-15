@@ -39,6 +39,30 @@ describe("groupSerials", () => {
     expect(result[0].isCurrentLocation).toBe(true);
     expect(result[1].isCurrentLocation).toBe(false);
   });
+
+  it("converts a numeric Batch to a string serial", () => {
+    const rows = [row({Batch: 12345})];
+    const result = groupSerials(rows, null);
+    expect(result[0].serial).toEqual("12345");
+    expect(typeof result[0].serial).toBe("string");
+  });
+
+  it("does not throw sorting two same-location serials when one Batch is numeric", () => {
+    // Cin7 can return Batch as a JSON number for a purely numeric serial.
+    // `r.Batch as string` would relabel it without converting, and the sort
+    // below (a.serial.localeCompare(b.serial)) throws a TypeError on the
+    // real number — which escaped SerialService.lookup as an uncaught 500
+    // in the deployed picker. String(r.Batch) is what prevents that.
+    const rows = [
+      row({Batch: "SN-001", Location: "Auckland"}),
+      row({Batch: 12345, Location: "Auckland"}),
+    ];
+    let result: ReturnType<typeof groupSerials> = [];
+    expect(() => {
+      result = groupSerials(rows, null);
+    }).not.toThrow();
+    expect(result.every((s) => typeof s.serial === "string")).toBe(true);
+  });
 });
 
 describe("SerialService.lookup", () => {
@@ -77,5 +101,40 @@ describe("SerialService.lookup", () => {
     const service = new SerialService(client as never, {});
     const result = await service.lookup("WIDGET-001", "999");
     expect(result).toMatchObject({status: "ok", currentLocationName: null});
+  });
+});
+
+describe("SerialService.invalidate", () => {
+  const okRows = [row({Batch: "SN-001", Location: "Auckland"})];
+
+  it("clears the cached availability for that SKU, so the next lookup refetches", async () => {
+    const client = {getAvailability: vi.fn().mockResolvedValue(okRows), skuExists: vi.fn()};
+    const service = new SerialService(client as never, {});
+    await service.lookup("WIDGET-001", "123");
+    service.invalidate("WIDGET-001");
+    await service.lookup("WIDGET-001", "123");
+    expect(client.getAvailability).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the cached sku-exists result for that SKU too", async () => {
+    const client = {
+      getAvailability: vi.fn().mockResolvedValue([]),
+      skuExists: vi.fn().mockResolvedValue(false),
+    };
+    const service = new SerialService(client as never, {});
+    await service.lookup("NOT-IN-CIN7", "1");
+    service.invalidate("NOT-IN-CIN7");
+    await service.lookup("NOT-IN-CIN7", "1");
+    expect(client.skuExists).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not affect other SKUs' cached entries", async () => {
+    const client = {getAvailability: vi.fn().mockResolvedValue(okRows), skuExists: vi.fn()};
+    const service = new SerialService(client as never, {});
+    await service.lookup("WIDGET-001", "123");
+    await service.lookup("OTHER-SKU", "123");
+    service.invalidate("WIDGET-001");
+    await service.lookup("OTHER-SKU", "123");
+    expect(client.getAvailability).toHaveBeenCalledTimes(2);
   });
 });

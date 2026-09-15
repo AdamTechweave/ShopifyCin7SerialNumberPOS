@@ -61,10 +61,121 @@ describe("Cin7Client", () => {
     expect(error).toMatchObject({code: "BAD_RESPONSE"});
   });
 
+  it("tags a Cin7Error from a read call (getAvailability) as read-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client.getAvailability("X").catch((e) => e);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "read"});
+  });
+
+  it("tags a Cin7Error from getProductWithMovements as read-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client.getProductWithMovements("X").catch((e) => e);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "read"});
+  });
+
+  it("tags a Cin7Error from createStockAdjustment (the write) as write-phase", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response("", {status: 500}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client
+      .createStockAdjustment({
+        EffectiveDate: "2026-09-15T00:00:00.000",
+        Status: "COMPLETED",
+        Reference: "r",
+        Comment: "c",
+        UpdateOnHand: true,
+        Lines: [],
+      })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(Cin7Error);
+    expect(error).toMatchObject({code: "BAD_RESPONSE", phase: "write"});
+  });
+
+  it("tags a network-level Cin7Error from createStockAdjustment as write-phase too", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    const error = await client
+      .createStockAdjustment({
+        EffectiveDate: "2026-09-15T00:00:00.000",
+        Status: "COMPLETED",
+        Reference: "r",
+        Comment: "c",
+        UpdateOnHand: true,
+        Lines: [],
+      })
+      .catch((e) => e);
+    expect(error).toMatchObject({code: "UNREACHABLE", phase: "write"});
+  });
+
   it("skuExists checks the product endpoint", async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Total: 1, Products: [{SKU: "WIDGET-001"}]}));
     const client = new Cin7Client("acct", "key", fetchFn);
     expect(await client.skuExists("WIDGET-001")).toBe(true);
     expect(fetchFn.mock.calls[0][0]).toContain("/ExternalApi/v2/product");
+  });
+
+  it("sends an abort signal so a hung Cin7 response cannot hang the request", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ProductAvailabilityList: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await client.getAvailability("WIDGET-001");
+    const [, init] = fetchFn.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("maps an aborted request to UNREACHABLE", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new DOMException("aborted", "TimeoutError"));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await expect(client.getAvailability("WIDGET-001")).rejects.toMatchObject({code: "UNREACHABLE"});
+  });
+
+  it("posts a stock adjustment with both lines and UpdateOnHand set", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({TaskID: "task-1", NewStockLines: [], ExistingStockLines: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+
+    await client.createStockAdjustment({
+      EffectiveDate: "2026-09-15T00:00:00.000",
+      Status: "COMPLETED",
+      Reference: "POS-SERIAL-XFORM:BIKE:BIKE001:A-BIKE001:2026-09-15",
+      Comment: "Assembled BIKE001 -> A-BIKE001",
+      UpdateOnHand: true,
+      Lines: [
+        {SKU: "BIKE", BatchSN: "BIKE001", Quantity: 0, UnitCost: 450, Location: "Main Warehouse"},
+        {SKU: "BIKE", BatchSN: "A-BIKE001", Quantity: 1, UnitCost: 450, Location: "Main Warehouse"},
+      ],
+    });
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toContain("/ExternalApi/v2/stockadjustment");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body);
+    expect(body.UpdateOnHand).toBe(true);
+    expect(body.Status).toBe("COMPLETED");
+    expect(body.Lines[0]).toMatchObject({BatchSN: "BIKE001", Quantity: 0});
+    expect(body.Lines[1]).toMatchObject({BatchSN: "A-BIKE001", Quantity: 1});
+  });
+
+  it("requests product movements for cost lookup", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Products: [{AverageCost: 12, Movements: []}]}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    await client.getProductWithMovements("BIKE");
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain("/ExternalApi/v2/product");
+    expect(url).toContain("Sku=BIKE");
+    expect(url).toContain("IncludeMovements=true");
+  });
+
+  it("returns an empty product shape when Cin7 knows no such SKU", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({Products: []}));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    expect(await client.getProductWithMovements("NOPE")).toEqual({});
+  });
+
+  it("ignores a substring SKU match and refuses to guess", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({
+      Products: [{SKU: "BIKE-CARBON", AverageCost: 4500}, {SKU: "BIKE", AverageCost: 450}],
+    }));
+    const client = new Cin7Client("acct", "key", fetchFn);
+    expect(await client.getProductWithMovements("BIKE")).toEqual({SKU: "BIKE", AverageCost: 450});
   });
 });

@@ -21,7 +21,10 @@ export function groupSerials(
   return rows
     .filter((r) => r.Batch !== null && r.Batch !== "" && r.Available > 0)
     .map((r) => ({
-      serial: r.Batch as string,
+      // Cin7's Batch can arrive as a JSON number for a purely numeric
+      // serial — String() converts it for real, where `as string` would
+      // only have relabelled the type and left a number at runtime.
+      serial: String(r.Batch),
       locationName: r.Location,
       available: r.Available,
       isCurrentLocation: r.Location === currentLocationName,
@@ -62,6 +65,16 @@ export class SerialService {
       this.skuExistsCache.set(sku, exists);
     }
     return exists ? {status: "no_stock"} : {status: "sku_not_found"};
+  }
+
+  // Called after a serial transform's write attempt (see
+  // api.pos.serial-transform.tsx) so the next lookup for this SKU re-reads
+  // Cin7 instead of serving pre-write rows for up to AVAILABILITY_TTL_MS.
+  // Clears both caches: a transform can turn a previously out-of-stock SKU
+  // into one with stock (or vice versa), which skuExistsCache also gates.
+  invalidate(sku: string): void {
+    this.availabilityCache.delete(sku);
+    this.skuExistsCache.delete(sku);
   }
 }
 

@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "preact/hooks";
 import {fetchSerials, type SerialLookup} from "../lib/api";
 import {excludeInCart, matchScan, type CartLineLike} from "../lib/serials";
+import {SerialList} from "./SerialList";
 
 interface Props {
   line: CartLineLike;
@@ -12,7 +13,6 @@ interface Props {
 export function SerialPicker({line, cart, onDone, onChoose}: Props) {
   const scanner = shopify.scanner;
   const [result, setResult] = useState<SerialLookup | null>(null);
-  const [query, setQuery] = useState("");
   const [reload, setReload] = useState(0);
   const choosingRef = useRef(false);
 
@@ -63,82 +63,27 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
     );
   }
 
-  if (result.status === "error") {
+  if (result.status !== "ok") {
     return (
       <s-page heading={line.title}>
-        <s-banner tone="critical" heading="Can't reach Cin7">
-          {`Serial numbers are unavailable right now (${result.code}).`}
-        </s-banner>
-        <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
-        <s-button onClick={onDone}>Back</s-button>
-      </s-page>
-    );
-  }
-  if (result.status === "sku_not_found") {
-    return (
-      <s-page heading={line.title}>
-        <s-banner tone="critical" heading="SKU not found in Cin7">
-          {`${line.sku} doesn't match any Cin7 product. Fix the SKU mapping before selling this item.`}
-        </s-banner>
-        <s-button onClick={onDone}>Back</s-button>
-      </s-page>
-    );
-  }
-  if (result.status === "no_stock") {
-    return (
-      <s-page heading={line.title}>
-        <s-banner heading="No serials in stock">
-          {`Cin7 has no available serial numbers for ${line.sku} at any location.`}
-        </s-banner>
+        <SerialList state={result} sku={line.sku} onRetry={() => setReload((n) => n + 1)} />
         <s-button onClick={onDone}>Back</s-button>
       </s-page>
     );
   }
 
   const candidates = excludeInCart(result.serials, cart.lineItems, line.uuid);
-  const visible = query
-    ? candidates.filter((s) => s.serial.toLowerCase().includes(query.toLowerCase()))
-    : candidates;
-  const current = visible.filter((s) => s.isCurrentLocation);
-  const others = visible.filter((s) => !s.isCurrentLocation);
-  const otherLocations = [...new Set(others.map((s) => s.locationName))];
 
   return (
     <s-page heading={line.title}>
       <s-scroll-box>
-        <s-section>
-          <s-search-field
-            placeholder="Search serial numbers"
-            value={query}
-            onInput={(e) => setQuery(e.currentTarget.value ?? "")}
-          />
-          <s-button onClick={() => scanner.showCameraScanner()}>Scan barcode</s-button>
-        </s-section>
-        <s-section
-          heading={
-            result.currentLocationName
-              ? `This store — ${result.currentLocationName}`
-              : "This store"
-          }
-        >
-          {current.length === 0 && <s-text>No serials at this location.</s-text>}
-          {current.map((s) => (
-            <s-clickable key={s.serial} onClick={() => onChoose(s.serial)}>
-              <s-text>{s.serial}</s-text>
-            </s-clickable>
-          ))}
-        </s-section>
-        {otherLocations.map((location) => (
-          <s-section key={location} heading={location}>
-            {others
-              .filter((s) => s.locationName === location)
-              .map((s) => (
-                <s-clickable key={s.serial} onClick={() => onChoose(s.serial)}>
-                  <s-text>{s.serial}</s-text>
-                </s-clickable>
-              ))}
-          </s-section>
-        ))}
+        <SerialList
+          state={{...result, serials: candidates}}
+          sku={line.sku}
+          onRetry={() => setReload((n) => n + 1)}
+          onSelect={(s) => onChoose(s.serial)}
+          searchable
+        />
         <s-button onClick={onDone}>Back</s-button>
       </s-scroll-box>
     </s-page>

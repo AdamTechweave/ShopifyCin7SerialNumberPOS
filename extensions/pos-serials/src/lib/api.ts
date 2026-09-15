@@ -1,5 +1,6 @@
 import type {AvailableSerial} from "./serials";
 import {SERIAL_TAG, toProductGid, buildSerializedMap} from "./tags";
+import type {TransformDirection} from "./transform";
 
 const tagCache = new Map<string, boolean>();
 
@@ -77,5 +78,107 @@ export async function fetchSerials(sku: string): Promise<SerialLookup> {
     return (await response.json()) as SerialLookup;
   } catch {
     return {status: "error", code: "NETWORK"};
+  }
+}
+
+// Mirrors `TransformResult` in app/services/serial-transform.server.ts, plus
+// the client-only `error` member — the same split `SerialLookup` makes on
+// top of the server's `SerialLookupResult`. Keep this in sync with the
+// server union; the screens switch on every member.
+export type TransformResponse =
+  | {
+      status: "ok";
+      fromSerial: string;
+      toSerial: string;
+      unitCost: number;
+      costSource: "movement" | "average";
+      taskId: string | null;
+      /** ExistingStockLines/NewStockLines counts — see server-side TransformResult. */
+      existingLineCount: number;
+      newLineCount: number;
+    }
+  | {status: "preview"; fromSerial: string; toSerial: string; unitCost: number; costSource: "movement" | "average"}
+  | {status: "already_transformed"}
+  | {status: "not_transformed"}
+  | {status: "too_long"}
+  | {status: "empty_target_serial"}
+  | {status: "unknown_location"}
+  | {status: "serial_not_found"}
+  | {status: "not_single_unit"}
+  | {status: "serial_allocated"}
+  | {status: "target_exists"}
+  | {status: "cost_unresolved"}
+  // The write already succeeded — Cin7 accepted the adjustment — but the
+  // response carried no evidence the target serial was created. Not "nothing
+  // happened": never retry on this, since Cin7 has no idempotency key and a
+  // retry would double-adjust stock. `taskId` lets staff trace the write in
+  // Cin7 by hand.
+  | {status: "written_unconfirmed"; taskId: string | null; existingLineCount: number; newLineCount: number}
+  // `phase` distinguishes a failed pre-write lookup (nothing written, safe
+  // to retry) from a failure during the write itself (may have written,
+  // never retry) — see Cin7Error's phase comment server-side.
+  | {status: "error"; code: string; phase: "read" | "write"};
+
+export async function postSerialTransform(input: {
+  sku: string;
+  serial: string;
+  locationId: string;
+  direction: TransformDirection;
+  dryRun?: boolean;
+}): Promise<TransformResponse> {
+  // A dry run can never reach the server's write call (it returns "preview"
+  // before that), so any failure on one is read-phase by definition,
+  // regardless of what the server says or whether it was even reached.
+  const isDryRun = input.dryRun === true;
+  try {
+    // No Content-Type header, deliberately: setting one makes this a
+    // non-simple cross-origin request, which mandates an OPTIONS preflight
+    // — and this app has no OPTIONS handler, so a preflight would 405
+    // before any route module runs. Without it, fetch sends a string body
+    // as text/plain, which stays a simple request and never preflights.
+    // request.json() on the server parses the body regardless of the
+    // Content-Type it arrives with, so nothing else here depends on it.
+    const response = await fetch("/api/pos/serial-transform", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as {error?: string; phase?: string};
+      // Trust the server's tag when it says "read"; otherwise default to the
+      // more cautious "write" — fail closed, since an ambiguous failure is
+      // exactly when staff must not be told a retry is safe.
+      const phase: "read" | "write" = isDryRun || body.phase === "read" ? "read" : "write";
+      return {status: "error", code: body.error ?? `HTTP_${response.status}`, phase};
+    }
+    return (await response.json()) as TransformResponse;
+  } catch {
+    return {status: "error", code: "NETWORK", phase: isDryRun ? "read" : "write"};
+  }
+}
+
+/**
+ * The product-details targets give a variantId, but the serials endpoint keys
+ * off SKU. `fetchProductVariantWithId` is an on-device POS lookup — no network
+ * cost to us — and `sku` is optional on the variant.
+ *
+ * Three distinct outcomes collapse to `null` if this just returns
+ * `string | null`: the variant isn't found on-device, it has no SKU set, or
+ * the lookup itself failed. Those tell very different stories to staff (a
+ * device sync issue vs. a data-entry gap vs. a transient error), so callers
+ * get a discriminated result instead and choose their own copy.
+ */
+export type VariantSkuLookup =
+  | {status: "ok"; sku: string}
+  | {status: "no_sku"}
+  | {status: "not_found"}
+  | {status: "error"};
+
+export async function fetchVariantSku(variantId: number): Promise<VariantSkuLookup> {
+  try {
+    const variant = await shopify.productSearch.fetchProductVariantWithId(variantId);
+    if (!variant) return {status: "not_found"};
+    return variant.sku ? {status: "ok", sku: variant.sku} : {status: "no_sku"};
+  } catch {
+    return {status: "error"};
   }
 }
