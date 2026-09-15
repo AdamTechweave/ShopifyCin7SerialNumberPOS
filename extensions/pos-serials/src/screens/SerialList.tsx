@@ -7,10 +7,18 @@ interface Props {
   onRetry: () => void;
   onSelect?: (serial: AvailableSerial) => void;
   searchable?: boolean;
+  sku?: string;
 }
 
-export function SerialList({state, onRetry, onSelect, searchable}: Props) {
+export function SerialList({state, onRetry, onSelect, searchable, sku}: Props) {
   const scanner = shopify.scanner;
+  // Lives here (not in the caller) since it's presentation-only. Note this
+  // is a latent behaviour difference from when it lived in the
+  // never-unmounting SerialPicker: SerialList unmounts while its caller
+  // refetches (SerialPicker's `result === null` loading branch), so a
+  // typed query now resets on that remount. Unobservable today — Retry
+  // only appears in the `error` branch, which has no search field — but
+  // worth flagging if a future caller can reach both at once.
   const [query, setQuery] = useState("");
 
   if (state.status === "error") {
@@ -24,12 +32,24 @@ export function SerialList({state, onRetry, onSelect, searchable}: Props) {
     );
   }
 
-  if (state.status !== "ok") {
-    // `sku_not_found` / `no_stock` copy embeds the queried SKU, which
-    // `SerialLookup` doesn't carry on these variants. Callers that need
-    // those two states render them inline themselves (see SerialPicker)
-    // rather than through SerialList.
-    return null;
+  if (state.status === "sku_not_found") {
+    return (
+      <s-banner tone="critical" heading="SKU not found in Cin7">
+        {sku
+          ? `${sku} doesn't match any Cin7 product. Fix the SKU mapping before selling this item.`
+          : "This SKU doesn't match any Cin7 product."}
+      </s-banner>
+    );
+  }
+
+  if (state.status === "no_stock") {
+    return (
+      <s-banner heading="No serials in stock">
+        {sku
+          ? `Cin7 has no available serial numbers for ${sku} at any location.`
+          : "No available serial numbers at any location."}
+      </s-banner>
+    );
   }
 
   const candidates = state.serials;

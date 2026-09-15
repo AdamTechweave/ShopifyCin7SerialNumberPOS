@@ -63,30 +63,10 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
     );
   }
 
-  if (result.status === "sku_not_found") {
+  if (result.status !== "ok") {
     return (
       <s-page heading={line.title}>
-        <s-banner tone="critical" heading="SKU not found in Cin7">
-          {`${line.sku} doesn't match any Cin7 product. Fix the SKU mapping before selling this item.`}
-        </s-banner>
-        <s-button onClick={onDone}>Back</s-button>
-      </s-page>
-    );
-  }
-  if (result.status === "no_stock") {
-    return (
-      <s-page heading={line.title}>
-        <s-banner heading="No serials in stock">
-          {`Cin7 has no available serial numbers for ${line.sku} at any location.`}
-        </s-banner>
-        <s-button onClick={onDone}>Back</s-button>
-      </s-page>
-    );
-  }
-  if (result.status === "error") {
-    return (
-      <s-page heading={line.title}>
-        <SerialList state={result} onRetry={() => setReload((n) => n + 1)} />
+        <SerialList state={result} sku={line.sku} onRetry={() => setReload((n) => n + 1)} />
         <s-button onClick={onDone}>Back</s-button>
       </s-page>
     );
@@ -99,6 +79,7 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
       <s-scroll-box>
         <SerialList
           state={{...result, serials: candidates}}
+          sku={line.sku}
           onRetry={() => setReload((n) => n + 1)}
           onSelect={(s) => onChoose(s.serial)}
           searchable
