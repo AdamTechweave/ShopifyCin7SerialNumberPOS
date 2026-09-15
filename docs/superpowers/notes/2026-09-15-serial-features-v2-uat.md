@@ -50,6 +50,13 @@ Then the states that matter more than the happy path:
 This exercises every guard and the cost lookup **without writing anything**. Tap through
 to the confirm screen and **do not confirm**.
 
+> **What this phase cannot tell you.** A dry run never sends anything to Cin7. It proves
+> the guards and the cost resolution — it proves **nothing** about how Cin7 handles the
+> write itself. Whether a `COMPLETED` POST completes in one call, whether one document
+> accepts two lines differing only by serial, and whether `UpdateOnHand` behaves on
+> serialised stock are all answered for the first time in **Phase 2**. Do not treat a clean
+> Phase 1 as clearance; it de-risks the inputs, not the write.
+
 - [ ] **Transform serial** → pick a serial without an `A-` prefix → the action offered is **Assemble**.
 - [ ] The confirm screen shows: from-serial, to-serial (`A-` prefixed), location, **unit cost**,
       and **where the cost came from** ("from last movement" or "product average").

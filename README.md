@@ -208,16 +208,20 @@ timeout or an ambiguous failure would risk creating a second adjustment and a
 duplicate serial, with nothing on the Cin7 side to catch it. There is no auto-retry
 anywhere in this path, and the UI never offers one once a write may have happened.
 
-`dryRun` is the de-facto substitute for idempotency: it builds the exact payload and
-resolves cost without POSTing anything (`{status: "preview", ...}`), and the
-confirmation screen always runs a fresh dry run before showing staff what it's about
-to do. Re-selecting a serial after a failure therefore runs a new dry run first —
-which surfaces `target_exists` or a changed availability state if the previous
-attempt actually landed, so staff can tell whether a "failed" transform in fact
-wrote. **`dryRun` exists, first and foremost, so the first production transform for
-a client can be validated against a Cin7 sandbox before anything is written for
-real** — several of the API's behaviours here could not be confirmed from
-documentation (see **Known limitations**), so treat that first live run deliberately.
+`dryRun` is the de-facto substitute for idempotency. It runs every guard and resolves
+the cost without POSTing anything, returning `{status: "preview", ...}`, and the
+confirmation screen always runs a fresh dry run before showing staff what it is about
+to do. Re-selecting a serial after a failure therefore runs a new dry run first — whose
+guards surface `target_exists` or a changed availability state if the previous attempt
+actually landed, so staff can tell whether a "failed" transform in fact wrote.
+
+⚠️ **A dry run does not validate Cin7's behaviour.** It never sends anything to Cin7 and
+the `preview` response carries no payload, so it proves the guards and the cost
+resolution and nothing else. The assumptions about how Cin7 *responds* to the write —
+whether a `COMPLETED` POST completes in one call, whether one document accepts two lines
+differing only by `BatchSN`, whether `UpdateOnHand` behaves on serialised stock — are
+discharged **only by the first live transform**. Treat that first run as the experiment
+it is: one disposable unit, supervised, verified in Cin7 rather than in the app.
 
 **`written_unconfirmed` means the write likely succeeded, not that nothing
 happened.** Cin7 accepted the POST, but the response's `NewStockLines` didn't
@@ -465,17 +469,20 @@ done (from the design spec's acceptance criteria):
 
   | # | Assumption | Risk if wrong | Mitigation |
   |---|---|---|---|
-  | 1 | A single `POST` with `Status: "COMPLETED"` completes the adjustment in one call | Every Cin7 doc example `POST`s `DRAFT` then `PUT`s `COMPLETED` instead | Validate with `dryRun` first; the response is asserted for a confirmed new stock line before reporting success |
+  | 1 | A single `POST` with `Status: "COMPLETED"` completes the adjustment in one call | Every Cin7 doc example `POST`s `DRAFT` then `PUT`s `COMPLETED` instead | **Not provable before the first live write** — a dry run never POSTs. The response is asserted for a confirmed new stock line before success is reported; verify the adjustment is completed, not draft, in Cin7 after the first run |
   | 2 | `UnitCost` must be sent on both lines, including the `Quantity: 0` one | Downgraded to low risk after reading the API Blueprint directly (not just the docs): `Lines` on `POST` is typed `New Stock Line Model`, where `UnitCost` is *required* — this is what the schema mandates, not a guess | Send the resolved cost on both lines (already implemented) |
   | 3 | One document accepts two lines differing only by `BatchSN` | Cin7 might merge or silently drop one | Response asserted for a non-empty `NewStockLines` (`written_unconfirmed` if absent) |
   | 4 | `UpdateOnHand: true` behaves correctly for serialised stock | Untested combination; the documented default (`false`) is known to adjust the wrong quantity | Set explicitly; verify on the first live transform per client |
   | 5 | Cin7 enforces no serial uniqueness | A duplicate serial could otherwise be created | Pre-write availability check refuses if the target serial already exists at that location (`target_exists`); no auto-retry, ever |
   | 6 | No endpoint exposes cost per serial directly | The two-source cost resolution could be wrong for a SKU with unusual movement history | Refuse rather than guess (`cost_unresolved`); resolved cost and its source are shown to staff before they commit |
 
-  **This is exactly why `dryRun` exists: to let the first production transform
-  for any client be validated against a Cin7 sandbox before anything is written
-  for real.** Do this before the first live transform on a new client's data —
-  see **Serial transform** above.
+  **Risks 1, 3 and 4 can only be discharged by performing a real transform**, because
+  they are all about how Cin7 responds to the POST and a dry run never sends one. Do the
+  first transform for any client on a **disposable sandbox unit**, supervised, and verify
+  the result in Cin7's own UI rather than in the app: one document, both lines, old serial
+  at quantity 0, new at 1, same location, cost carried across, status completed. The
+  result screen reports Cin7's own `existing` and `new` stock-line counts to make that
+  check easier. See `docs/superpowers/notes/2026-09-15-serial-features-v2-uat.md`.
 - **The serial list is never proof of what a transform did.** `/api/pos/serials`
   is served from a 45-second in-process cache (`app/services/serials.server.ts`).
   The serial-transform route invalidates that cache for the affected SKU after

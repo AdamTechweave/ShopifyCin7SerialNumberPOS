@@ -198,9 +198,21 @@ Response is a discriminated union mirroring `SerialLookupResult`'s house style:
 | {status: "error"; code: Cin7ErrorCode}
 ```
 
-**`dryRun` is deliberate.** Six behaviours could not be confirmed from documentation
-(see Risk register). A dry run returns the exact payload and resolved cost without
-writing, so the first real transform can be validated against a Cin7 sandbox first.
+**`dryRun` is deliberate — but note precisely what it does and does not prove.**
+
+It runs every guard and resolves the cost without POSTing, returning
+`{status: "preview", fromSerial, toSerial, unitCost, costSource}`.
+
+> **Corrected after the whole-branch review.** This section originally claimed a dry run
+> "returns the exact payload… so the first real transform can be validated against a Cin7
+> sandbox first". That is wrong, and the implementation correctly followed the union rather
+> than the prose: `preview` carries **no payload**, and nothing is sent to Cin7. So a dry run
+> validates the guards and risk #6 (cost resolution) — and **nothing** about risks #1, #3 or
+> #4, all of which concern how Cin7 responds to the POST. Those are discharged only by the
+> first live write. The value of `dryRun` is that it lets staff see the resolved cost and
+> target before committing, and that re-selecting a serial after a failure runs a fresh dry
+> run whose guards reveal whether the earlier attempt landed. It is not pre-flight
+> validation of Cin7's behaviour.
 
 ### Client changes
 
