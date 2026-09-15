@@ -25,12 +25,10 @@ function ProductModal() {
   return (
     <s-page heading="Serial numbers">
       <s-section>
-        <s-clickable onClick={() => setScreen("serials")}>
-          <s-text>View serial numbers</s-text>
-        </s-clickable>
-        <s-clickable onClick={() => setScreen("transform")}>
-          <s-text>Transform serial</s-text>
-        </s-clickable>
+        {/* Buttons, not clickable text: the text rows were too small a tap
+            target on a handheld. */}
+        <s-button onClick={() => setScreen("serials")}>View serial numbers</s-button>
+        <s-button onClick={() => setScreen("transform")}>Transform serial</s-button>
       </s-section>
     </s-page>
   );

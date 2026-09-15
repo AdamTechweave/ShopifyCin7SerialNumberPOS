@@ -1,4 +1,4 @@
-import type {ActionFunctionArgs} from "react-router";
+import type {ActionFunctionArgs, LoaderFunctionArgs} from "react-router";
 import {authenticate} from "../shopify.server";
 import {getTransformService} from "../services/serial-transform.server";
 import {getSerialService} from "../services/serials.server";
@@ -6,6 +6,20 @@ import {Cin7Error} from "../services/cin7.server";
 import type {TransformDirection} from "../services/transform.server";
 
 const DIRECTIONS: TransformDirection[] = ["assemble", "disassemble"];
+
+// POS sends a CORS preflight before this POST — the Authorization header it
+// injects automatically is not CORS-safelisted, so the request is never
+// "simple". React Router routes OPTIONS to the LOADER, so a route with only an
+// action 400s ("did not provide a `loader`") before any of our code runs, and
+// the extension reports it as a failed lookup. `authenticate.public.checkout`
+// answers the preflight itself — respondToOptionsRequest throws a 204 with the
+// CORS headers before it ever looks for a session token. This is why
+// /api/pos/serials works without one: it has a loader already.
+export const loader = async ({request}: LoaderFunctionArgs) => {
+  const {cors} = await authenticate.public.checkout(request);
+  // Only reached by a genuine authenticated GET; there is nothing to read here.
+  return cors(Response.json({error: "METHOD_NOT_ALLOWED"}, {status: 405}));
+};
 
 export const action = async ({request}: ActionFunctionArgs) => {
   const {cors} = await authenticate.public.checkout(request);

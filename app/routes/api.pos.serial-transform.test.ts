@@ -185,3 +185,20 @@ describe("POST /api/pos/serial-transform", () => {
     });
   });
 });
+
+describe("CORS preflight", () => {
+  it("answers an OPTIONS preflight instead of 400ing for a missing loader", async () => {
+    const {loader} = await import("./api.pos.serial-transform");
+    const res = await loader({
+      request: new Request("https://x/api/pos/serial-transform", {method: "OPTIONS"}),
+    } as never);
+    // What this pins is that the route EXPORTS a loader at all. Without one,
+    // React Router 400s an OPTIONS request before any of our code runs
+    // ("did not provide a `loader`"), which is the bug this fixes. It does not
+    // exercise the real preflight: `authenticate` is mocked here, so the 204
+    // that respondToOptionsRequest throws in production never fires, and the
+    // call falls through to the 405 below.
+    expect(res.status).toBe(405);
+    expect(transform).not.toHaveBeenCalled();
+  });
+});
