@@ -1,7 +1,6 @@
 import {Cin7Client} from "./cin7.server";
 import {computeTargetSerial, type TransformDirection} from "./transform.server";
 import {resolveUnitCost} from "./cost.server";
-import {groupSerials} from "./serials.server";
 import {getConfig} from "../config.server";
 
 export type TransformResult =
@@ -17,10 +16,14 @@ export type TransformResult =
   | {status: "already_transformed"}
   | {status: "not_transformed"}
   | {status: "too_long"}
-  | {status: "target_exists"}
-  | {status: "serial_not_found"}
+  | {status: "empty_target_serial"}
   | {status: "unknown_location"}
-  | {status: "cost_unresolved"};
+  | {status: "serial_not_found"}
+  | {status: "not_single_unit"}
+  | {status: "serial_allocated"}
+  | {status: "target_exists"}
+  | {status: "cost_unresolved"}
+  | {status: "write_unconfirmed"; taskId: string | null};
 
 /**
  * Stable, human-legible reference for the stock adjustment. Not used for
@@ -54,21 +57,44 @@ export class TransformService {
     if (!target.ok) return {status: target.reason};
     const toSerial = target.target;
 
-    // Guard 2: also local.
+    // Guard 1b: also local. Disassembling a serial that is *only* the bare
+    // prefix (e.g. "A-") computes to an empty string. groupSerials would
+    // have dropped an empty Batch as a non-serial row, hiding it from
+    // target_exists entirely — refuse it explicitly instead of ever posting
+    // BatchSN: "".
+    if (toSerial === "") return {status: "empty_target_serial"};
+
+    // Guard 2: also local. Object.hasOwn, not a truthy `[key]` lookup, so a
+    // shopifyLocationId of "constructor" can't inherit a non-string value
+    // off Object.prototype and slip past this guard.
+    if (!Object.hasOwn(this.locationMap, shopifyLocationId)) return {status: "unknown_location"};
     const locationName = this.locationMap[shopifyLocationId];
-    if (!locationName) return {status: "unknown_location"};
 
+    // Raw rows, not groupSerials: groupSerials filters to Available > 0,
+    // which would hide (a) a batch-tracked lot or otherwise multi-unit row
+    // that still has stock available, and (b) a fully-allocated existing
+    // target serial (Available: 0) — both of which the guards below must be
+    // able to see. Cin7's BatchSN can arrive as a JSON number for a purely
+    // numeric serial (see cost.server.ts), so compare via String(r.Batch).
     const rows = await this.client.getAvailability(sku);
-    const available = groupSerials(rows, locationName);
 
-    // Guard 3: source serial must exist, in stock, at this location.
-    const source = available.find((s) => s.serial === serial && s.locationName === locationName);
-    if (!source) return {status: "serial_not_found"};
+    const sourceRows = rows.filter((r) => String(r.Batch) === serial && r.Location === locationName);
+    if (sourceRows.length === 0) return {status: "serial_not_found"};
+    const source = sourceRows[0];
 
-    // Guard 4: target serial must not already exist at this location — Cin7
-    // enforces no serial uniqueness of its own, so this is the only defence
-    // against silently creating a duplicate.
-    const targetExists = available.some((s) => s.serial === toSerial && s.locationName === locationName);
+    // The write below sends Quantity: 0 for the source line, which Cin7
+    // treats as an ABSOLUTE new OnHand, not a delta — it zeroes whatever is
+    // on hand. Refuse anything but a single, fully unallocated unit so the
+    // write can never destroy more than the one unit it is renaming, and
+    // never orphan an allocation an open order is depending on.
+    if (source.OnHand !== 1) return {status: "not_single_unit"};
+    if (source.Allocated !== 0) return {status: "serial_allocated"};
+
+    // target_exists is our only defence against duplicate serials — Cin7
+    // enforces no uniqueness of its own — so this must catch a target
+    // serial even when it is fully allocated (Available: 0) at this
+    // location, which is why it runs against the raw rows too.
+    const targetExists = rows.some((r) => String(r.Batch) === toSerial && r.Location === locationName);
     if (targetExists) return {status: "target_exists"};
 
     // Guard 5: resolve cost before committing to a write; refuse rather than guess.
@@ -97,13 +123,22 @@ export class TransformService {
       ],
     });
 
+    const taskId = response.TaskID ?? null;
+
+    // Cin7 might merge or reject two lines that differ only by BatchSN — a
+    // 2xx alone doesn't prove the target serial was actually created. Require
+    // evidence of a new stock line before reporting success back to staff,
+    // since there is no undo against a real warehouse.
+    const newLines = response.NewStockLines ?? [];
+    if (newLines.length === 0) return {status: "write_unconfirmed", taskId};
+
     return {
       status: "ok",
       fromSerial: serial,
       toSerial,
       unitCost: cost.unitCost,
       costSource: cost.source,
-      taskId: response.TaskID ?? null,
+      taskId,
     };
   }
 }

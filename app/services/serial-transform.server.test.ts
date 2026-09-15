@@ -9,6 +9,18 @@ const row = (batch: string, location = "Main Warehouse", available = 1) => ({
   OnOrder: 0, StockOnHand: available, InTransit: 0, NextDeliveryDate: null,
 });
 
+// For cases where OnHand/Allocated/Available need to diverge from each
+// other — `row` above ties all three to one `available` number, which can't
+// express a multi-unit lot or a fully-allocated single unit.
+const stockRow = (
+  batch: string,
+  opts: {location?: string; onHand: number; allocated: number; available: number},
+) => ({
+  ID: "x", SKU: "BIKE", Name: "Bike", Barcode: null, Location: opts.location ?? "Main Warehouse", Bin: null,
+  Batch: batch, ExpiryDate: null, OnHand: opts.onHand, Allocated: opts.allocated, Available: opts.available,
+  OnOrder: 0, StockOnHand: opts.onHand, InTransit: 0, NextDeliveryDate: null,
+});
+
 function makeClient(over: Record<string, unknown> = {}) {
   return {
     getAvailability: vi.fn().mockResolvedValue([row("BIKE001")]),
@@ -37,6 +49,9 @@ describe("TransformService.transform", () => {
     const payload = client.createStockAdjustment.mock.calls[0][0];
     expect(payload.UpdateOnHand).toBe(true);
     expect(payload.Status).toBe("COMPLETED");
+    expect(payload.EffectiveDate).not.toContain("Z");
+    expect(payload.Reference).toMatch(/^POS-SERIAL-XFORM:BIKE:BIKE001:A-BIKE001:\d{4}-\d{2}-\d{2}$/);
+    expect(payload.Comment).toBe("Assembled BIKE001 -> A-BIKE001");
     expect(payload.Lines).toEqual([
       {SKU: "BIKE", BatchSN: "BIKE001", Quantity: 0, UnitCost: 450, Location: "Main Warehouse"},
       {SKU: "BIKE", BatchSN: "A-BIKE001", Quantity: 1, UnitCost: 450, Location: "Main Warehouse"},
@@ -65,6 +80,31 @@ describe("TransformService.transform", () => {
     expect(await svc(client).transform(input)).toEqual({status: "serial_not_found"});
   });
 
+  it("refuses when the source serial exists only at a different location", async () => {
+    const client = makeClient({getAvailability: vi.fn().mockResolvedValue([row("BIKE001", "Wellington")])});
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "serial_not_found"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a source row holding more than one unit — Quantity: 0 would zero the whole lot", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([stockRow("BIKE001", {onHand: 50, allocated: 0, available: 50})]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "not_single_unit"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a source serial that is allocated to an open order", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([stockRow("BIKE001", {onHand: 1, allocated: 1, available: 0})]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "serial_allocated"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
   it("refuses when the target serial already exists — Cin7 does not enforce uniqueness", async () => {
     const client = makeClient({getAvailability: vi.fn().mockResolvedValue([row("BIKE001"), row("A-BIKE001")])});
     const result = await svc(client).transform(input);
@@ -72,11 +112,44 @@ describe("TransformService.transform", () => {
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
   });
 
+  it("still refuses a duplicate target that is fully allocated (Available: 0)", async () => {
+    const client = makeClient({
+      getAvailability: vi.fn().mockResolvedValue([
+        row("BIKE001"),
+        stockRow("A-BIKE001", {onHand: 1, allocated: 1, available: 0}),
+      ]),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "target_exists"});
+    expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("refuses a disassemble that would produce an empty serial, without calling Cin7", async () => {
+    const client = makeClient();
+    const result = await svc(client).transform({...input, serial: "A-", direction: "disassemble"});
+    expect(result).toEqual({status: "empty_target_serial"});
+    expect(client.getAvailability).not.toHaveBeenCalled();
+  });
+
   it("refuses rather than guessing when cost cannot be resolved", async () => {
     const client = makeClient({getProductWithMovements: vi.fn().mockResolvedValue({})});
     const result = await svc(client).transform(input);
     expect(result).toEqual({status: "cost_unresolved"});
     expect(client.createStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it("reports write_unconfirmed when Cin7 gives no evidence of a new stock line", async () => {
+    const client = makeClient({
+      createStockAdjustment: vi.fn().mockResolvedValue({TaskID: "task-2", NewStockLines: [], ExistingStockLines: [{}]}),
+    });
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "write_unconfirmed", taskId: "task-2"});
+  });
+
+  it("write_unconfirmed carries a null taskId when Cin7 gives no TaskID either", async () => {
+    const client = makeClient({createStockAdjustment: vi.fn().mockResolvedValue({})});
+    const result = await svc(client).transform(input);
+    expect(result).toEqual({status: "write_unconfirmed", taskId: null});
   });
 
   it("writes nothing on a dry run", async () => {
@@ -92,7 +165,23 @@ describe("TransformService.transform", () => {
   it("disassembles back to the bare serial", async () => {
     const client = makeClient({getAvailability: vi.fn().mockResolvedValue([row("A-BIKE001")])});
     const result = await svc(client).transform({...input, serial: "A-BIKE001", direction: "disassemble"});
-    expect(result).toMatchObject({status: "ok", fromSerial: "A-BIKE001", toSerial: "BIKE001"});
+
+    expect(result).toEqual({
+      status: "ok", fromSerial: "A-BIKE001", toSerial: "BIKE001",
+      unitCost: 450, costSource: "average", taskId: "task-1",
+    });
+
+    expect(client.createStockAdjustment).toHaveBeenCalledTimes(1);
+    const payload = client.createStockAdjustment.mock.calls[0][0];
+    expect(payload.UpdateOnHand).toBe(true);
+    expect(payload.Status).toBe("COMPLETED");
+    expect(payload.EffectiveDate).not.toContain("Z");
+    expect(payload.Reference).toMatch(/^POS-SERIAL-XFORM:BIKE:A-BIKE001:BIKE001:\d{4}-\d{2}-\d{2}$/);
+    expect(payload.Comment).toBe("Disassembled A-BIKE001 -> BIKE001");
+    expect(payload.Lines).toEqual([
+      {SKU: "BIKE", BatchSN: "A-BIKE001", Quantity: 0, UnitCost: 450, Location: "Main Warehouse"},
+      {SKU: "BIKE", BatchSN: "BIKE001", Quantity: 1, UnitCost: 450, Location: "Main Warehouse"},
+    ]);
   });
 });
 
