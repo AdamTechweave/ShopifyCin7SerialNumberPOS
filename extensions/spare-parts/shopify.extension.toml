@@ -1,0 +1,19 @@
+api_version = "2026-04"
+
+[[extensions]]
+type = "ui_extension"
+# Change the merchant-facing name of the extension in locales/en.default.json
+name = "t:name"
+uid = "2c4731e7-2c6d-4e90-6c82-5bef7f1234ffa00342ca"
+handle = "spare-parts"
+description = "Add a custom-price spare part to the POS cart"
+
+# module: file that contains your extension’s source code
+# target: location where your extension appears in POS
+[[extensions.targeting]]
+module = "./src/Tile.tsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/Modal.tsx"
+target = "pos.home.modal.render"

@@ -311,13 +311,41 @@ Run `npm run typecheck` before `shopify app build` / `shopify app deploy`. The
 extension's `tsconfig.json` excludes `dist/`, so a previous build's output doesn't
 need to be cleared first.
 
+### Spare parts tile
+
+A second POS extension, `extensions/spare-parts`, adds a **Spare Parts** tile to the
+smart grid. Tapping it opens a modal with a single price field; adding puts a custom
+sale on the cart via `shopify.cart.addCustomSale`:
+
+```ts
+{quantity: 1, title: "Spare Parts", price: <normalised>, taxable: true}
+```
+
+The title is fixed, so every spare-parts line reads identically on a receipt, and the
+quantity is always 1 — staff needing several type the combined price or add the tile
+again.
+
+`src/lib/price.ts` holds the only logic worth testing and is fully covered: it strips a
+leading currency symbol and thousands separators, and refuses anything empty,
+non-numeric, zero, negative, or carrying more than two decimal places. It **rejects
+rather than rounds** a third decimal — silently turning `12.345` into `12.35` changes
+what the customer is charged with nobody seeing it.
+
+⚠️ **On tax.** `taxable: true` is the only tax control the API exposes. Whether the
+amount staff type is treated as GST-inclusive is your Shopify tax setting (Settings →
+Taxes → "All prices include tax"), which an extension cannot override. Confirm on a
+device what a typed `100` actually charges before training anyone on it.
+
+Spare parts never reach Cin7 and have no inventory record. They carry no `productId`,
+and `toCartLine` drops lines without one, so the serial tile ignores them entirely.
+
 ### Verify everything at once
 
 ```bash
 npm run verify
 ```
 
-Runs typecheck (both projects), the test suite, lint, **and `react-router build`**.
+Runs typecheck (backend plus **both** POS extensions), the test suite, lint, **and `react-router build`**.
 
 Include the build. Typecheck, tests and lint can all pass on a tree that fails to
 build — that happened on this branch: a colocated route test in `app/routes/` was

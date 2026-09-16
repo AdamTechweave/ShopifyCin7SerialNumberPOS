@@ -16,7 +16,7 @@
     "vite": "vite",
     "verify": "npm run typecheck && npm test && npm run lint && npm run build",
     "typecheck": "react-router typegen && tsc --noEmit && npm run typecheck:extensions",
-    "typecheck:extensions": "tsc --noEmit -p extensions/pos-serials/tsconfig.json",
+    "typecheck:extensions": "tsc --noEmit -p extensions/pos-serials/tsconfig.json && tsc --noEmit -p extensions/spare-parts/tsconfig.json",
     "test": "vitest run",
     "vercel-build": "react-router build"
   },
