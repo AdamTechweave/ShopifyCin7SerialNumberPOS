@@ -70,6 +70,14 @@ export const action = async ({request}: ActionFunctionArgs) => {
     return cors(Response.json(result));
   } catch (error) {
     if (error instanceof Cin7Error) {
+      // Log the full message, not just the code. Cin7Error.message carries
+      // Cin7's own response body (truncated to 500 chars) for a BAD_RESPONSE,
+      // which is the only place its rejection reason appears — and the client
+      // only ever sees the code. Without this the 502 is undiagnosable.
+      console.error(
+        `[serial-transform] Cin7 ${error.phase}-phase failure: ${error.code} — ${error.message}`,
+        {sku, serial, direction, dryRun: isDryRun},
+      );
       // An exception from the write phase is exactly when the cache is
       // least trustworthy — invalidate here too, not only on a clean result.
       if (!isDryRun) getSerialService().invalidate(sku);
