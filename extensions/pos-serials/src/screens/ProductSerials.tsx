@@ -52,7 +52,9 @@ export function ProductSerials({onDone}: Props) {
   if (skuState.status === "loading") {
     return (
       <s-page heading="Serial numbers">
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -60,10 +62,14 @@ export function ProductSerials({onDone}: Props) {
   if (skuState.status === "no_sku") {
     return (
       <s-page heading="Serial numbers">
-        <s-banner heading="No SKU set for this variant">
-          {"This variant has no SKU, so its Cin7 serial numbers can't be looked up."}
-        </s-banner>
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-banner heading="No SKU set for this variant">
+            {"This variant has no SKU, so its Cin7 serial numbers can't be looked up."}
+          </s-banner>
+        </s-section>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-page>
     );
   }
@@ -71,13 +77,19 @@ export function ProductSerials({onDone}: Props) {
   if (skuState.status === "not_found" || skuState.status === "error") {
     return (
       <s-page heading="Serial numbers">
-        <s-banner tone="critical" heading="Couldn't check this product">
-          {skuState.status === "not_found"
-            ? "Couldn't find this product variant on this device."
-            : "Something went wrong looking up this variant."}
-        </s-banner>
-        <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-banner tone="critical" heading="Couldn't check this product">
+            {skuState.status === "not_found"
+              ? "Couldn't find this product variant on this device."
+              : "Something went wrong looking up this variant."}
+          </s-banner>
+        </s-section>
+        <s-section>
+          <s-stack direction="block" gap="base">
+            <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
+            <s-button onClick={onDone}>Back</s-button>
+          </s-stack>
+        </s-section>
       </s-page>
     );
   }
@@ -85,7 +97,9 @@ export function ProductSerials({onDone}: Props) {
   if (!result) {
     return (
       <s-page heading="Serial numbers">
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading serial numbers…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -94,7 +108,9 @@ export function ProductSerials({onDone}: Props) {
     <s-page heading="Serial numbers">
       <s-scroll-box>
         <SerialList state={result} sku={skuState.sku} onRetry={() => setReload((n) => n + 1)} />
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-scroll-box>
     </s-page>
   );

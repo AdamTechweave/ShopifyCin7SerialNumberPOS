@@ -61,25 +61,49 @@ export function SerialList({state, onRetry, onSelect, searchable, sku}: Props) {
   const others = visible.filter((s) => !s.isCurrentLocation);
   const otherLocations = [...new Set(others.map((s) => s.locationName))];
 
-  const row = (s: AvailableSerial) =>
-    onSelect ? (
-      <s-clickable key={s.serial} onClick={() => onSelect(s)}>
-        <s-text>{s.serial}</s-text>
-      </s-clickable>
-    ) : (
-      <s-text key={s.serial}>{s.serial}</s-text>
-    );
+  const rows = (list: AvailableSerial[]) => (
+    <s-stack direction="block">
+      {list.map((s, index) => (
+        <s-stack key={s.serial} direction="block">
+          {index > 0 && <s-divider />}
+          {onSelect ? (
+            <s-clickable onClick={() => onSelect(s)}>
+              <s-box padding="base">
+                <s-stack
+                  direction="inline"
+                  gap="base"
+                  justifyContent="space-between"
+                  alignItems="center"
+                >
+                  <s-text type="strong">{s.serial}</s-text>
+                  <s-text type="small" color="subdued">
+                    Tap to assign
+                  </s-text>
+                </s-stack>
+              </s-box>
+            </s-clickable>
+          ) : (
+            <s-box padding="base">
+              <s-text>{s.serial}</s-text>
+            </s-box>
+          )}
+        </s-stack>
+      ))}
+    </s-stack>
+  );
 
   return (
     <>
       {searchable && (
         <s-section>
-          <s-search-field
-            placeholder="Search serial numbers"
-            value={query}
-            onInput={(e) => setQuery(e.currentTarget.value ?? "")}
-          />
-          <s-button onClick={() => scanner.showCameraScanner()}>Scan barcode</s-button>
+          <s-stack direction="block" gap="base">
+            <s-search-field
+              placeholder="Search serial numbers"
+              value={query}
+              onInput={(e) => setQuery(e.currentTarget.value ?? "")}
+            />
+            <s-button onClick={() => scanner.showCameraScanner()}>Scan barcode</s-button>
+          </s-stack>
         </s-section>
       )}
       <s-section
@@ -87,12 +111,18 @@ export function SerialList({state, onRetry, onSelect, searchable, sku}: Props) {
           state.currentLocationName ? `This store — ${state.currentLocationName}` : "This store"
         }
       >
-        {current.length === 0 && <s-text>No serials at this location.</s-text>}
-        {current.map(row)}
+        {current.length === 0 && (
+          <s-box padding="base">
+            <s-text color="subdued">
+              {query ? "No matching serials at this location." : "No serials at this location."}
+            </s-text>
+          </s-box>
+        )}
+        {rows(current)}
       </s-section>
       {otherLocations.map((location) => (
         <s-section key={location} heading={location}>
-          {others.filter((s) => s.locationName === location).map(row)}
+          {rows(others.filter((s) => s.locationName === location))}
         </s-section>
       ))}
     </>

@@ -40,7 +40,9 @@ export function LineList({cart, onPick}: Props) {
   if (!map) {
     return (
       <s-page heading="Serial numbers">
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -50,24 +52,42 @@ export function LineList({cart, onPick}: Props) {
     <s-page heading="Serial numbers">
       <s-scroll-box>
         <s-section heading="Serialized items in cart">
-          {lines.length === 0 && <s-text>No serialized products in the cart.</s-text>}
-          {lines.map((line) => {
-            const serial =
-              line.quantity === 1 ? line.properties[SERIAL_PROPERTY_KEY] : undefined;
-            return (
-              <s-clickable key={line.uuid} onClick={() => onPick(line.uuid)}>
-                <s-stack direction="inline" gap="base">
-                  <s-stack direction="block">
-                    <s-text>{line.title}</s-text>
-                    <s-text>{`${line.sku} · qty ${line.quantity}`}</s-text>
-                  </s-stack>
-                  <s-badge tone={serial ? "success" : "critical"}>
-                    {serial ?? "Needs serial"}
-                  </s-badge>
+          {lines.length === 0 && (
+            <s-box padding="base">
+              <s-text color="subdued">No serialized products in the cart.</s-text>
+            </s-box>
+          )}
+          <s-stack direction="block">
+            {lines.map((line, index) => {
+              const serial =
+                line.quantity === 1 ? line.properties[SERIAL_PROPERTY_KEY] : undefined;
+              return (
+                <s-stack key={line.uuid} direction="block">
+                  {index > 0 && <s-divider />}
+                  <s-clickable onClick={() => onPick(line.uuid)}>
+                    <s-box padding="base">
+                      <s-stack
+                        direction="inline"
+                        gap="base"
+                        justifyContent="space-between"
+                        alignItems="center"
+                      >
+                        <s-stack direction="block" gap="small-300">
+                          <s-text type="strong">{line.title}</s-text>
+                          <s-text type="small" color="subdued">
+                            {`${line.sku} · Qty ${line.quantity}`}
+                          </s-text>
+                        </s-stack>
+                        <s-badge tone={serial ? "success" : "critical"}>
+                          {serial ?? "Needs serial"}
+                        </s-badge>
+                      </s-stack>
+                    </s-box>
+                  </s-clickable>
                 </s-stack>
-              </s-clickable>
-            );
-          })}
+              );
+            })}
+          </s-stack>
         </s-section>
       </s-scroll-box>
     </s-page>

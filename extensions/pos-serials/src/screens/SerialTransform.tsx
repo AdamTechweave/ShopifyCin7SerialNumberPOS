@@ -27,8 +27,18 @@ type SkuState =
 
 type Step =
   | {name: "pick"}
-  | {name: "confirm"; serial: string; direction: TransformDirection; target: string}
-  | {name: "result"; serial: string; target: string; response: TransformResponse};
+  | {
+      name: "confirm";
+      serial: string;
+      direction: TransformDirection;
+      target: string;
+    }
+  | {
+      name: "result";
+      serial: string;
+      target: string;
+      response: TransformResponse;
+    };
 
 // `computeTargetSerial`'s three failure reasons are exactly three members of
 // `TransformResponse` (same shape, no extra fields), so a locally-detected
@@ -106,7 +116,12 @@ export function SerialTransform({onDone}: Props) {
       });
       return;
     }
-    setStep({name: "confirm", serial: s.serial, direction, target: targetResult.target});
+    setStep({
+      name: "confirm",
+      serial: s.serial,
+      direction,
+      target: targetResult.target,
+    });
   }, []);
 
   // Scan-to-select, mirroring SerialPicker.tsx: subscribe while a serial can
@@ -137,7 +152,9 @@ export function SerialTransform({onDone}: Props) {
   if (skuState.status === "loading") {
     return (
       <s-page heading="Transform serial">
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -145,10 +162,14 @@ export function SerialTransform({onDone}: Props) {
   if (skuState.status === "no_sku") {
     return (
       <s-page heading="Transform serial">
-        <s-banner heading="No SKU set for this variant">
-          {"This variant has no SKU, so its Cin7 serial numbers can't be looked up."}
-        </s-banner>
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-banner heading="No SKU set for this variant">
+            {"This variant has no SKU, so its Cin7 serial numbers can't be looked up."}
+          </s-banner>
+        </s-section>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-page>
     );
   }
@@ -156,13 +177,19 @@ export function SerialTransform({onDone}: Props) {
   if (skuState.status === "not_found" || skuState.status === "error") {
     return (
       <s-page heading="Transform serial">
-        <s-banner tone="critical" heading="Couldn't check this product">
-          {skuState.status === "not_found"
-            ? "Couldn't find this product variant on this device."
-            : "Something went wrong looking up this variant."}
-        </s-banner>
-        <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-banner tone="critical" heading="Couldn't check this product">
+            {skuState.status === "not_found"
+              ? "Couldn't find this product variant on this device."
+              : "Something went wrong looking up this variant."}
+          </s-banner>
+        </s-section>
+        <s-section>
+          <s-stack direction="block" gap="base">
+            <s-button onClick={() => setReload((n) => n + 1)}>Retry</s-button>
+            <s-button onClick={onDone}>Back</s-button>
+          </s-stack>
+        </s-section>
       </s-page>
     );
   }
@@ -170,7 +197,9 @@ export function SerialTransform({onDone}: Props) {
   if (!result) {
     return (
       <s-page heading="Transform serial">
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading serial numbers…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -187,24 +216,42 @@ export function SerialTransform({onDone}: Props) {
         locationName={locationName}
         onBack={() => setStep({name: "pick"})}
         onResult={(response) =>
-          setStep({name: "result", serial: step.serial, target: step.target, response})
+          setStep({
+            name: "result",
+            serial: step.serial,
+            target: step.target,
+            response,
+          })
         }
       />
     );
   }
 
   if (step.name === "result") {
-    const outcome = describeOutcome(step.response, {serial: step.serial, target: step.target});
+    const outcome = describeOutcome(step.response, {
+      serial: step.serial,
+      target: step.target,
+    });
     return (
       <s-page heading="Transform serial">
-        <s-banner tone={outcome.tone} heading={outcome.heading}>
-          {outcome.message}
-        </s-banner>
-        {outcome.detail && <s-text>{outcome.detail}</s-text>}
-        {nothingWasWritten(step.response) && (
-          <s-button onClick={() => setStep({name: "pick"})}>Pick another serial</s-button>
-        )}
-        <s-button onClick={onDone}>Done</s-button>
+        <s-section>
+          <s-banner tone={outcome.tone} heading={outcome.heading}>
+            {outcome.message}
+          </s-banner>
+          {outcome.detail && (
+            <s-box padding="base none none">
+              <s-text color="subdued">{outcome.detail}</s-text>
+            </s-box>
+          )}
+        </s-section>
+        <s-section>
+          <s-stack direction="block" gap="base">
+            {nothingWasWritten(step.response) && (
+              <s-button onClick={() => setStep({name: "pick"})}>Pick another serial</s-button>
+            )}
+            <s-button onClick={onDone}>Done</s-button>
+          </s-stack>
+        </s-section>
       </s-page>
     );
   }
@@ -219,7 +266,9 @@ export function SerialTransform({onDone}: Props) {
           onSelect={handleSelect}
           searchable
         />
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-scroll-box>
     </s-page>
   );
@@ -238,7 +287,15 @@ interface ConfirmStepProps {
 // Isolated from `SerialTransform` so its own dry-run/submit state doesn't
 // leak into the parent's step machine — entering this step always starts a
 // fresh dry run, and unmounting it (going back to pick) simply discards it.
-function ConfirmStep({sku, serial, direction, target, locationName, onBack, onResult}: ConfirmStepProps) {
+function ConfirmStep({
+  sku,
+  serial,
+  direction,
+  target,
+  locationName,
+  onBack,
+  onResult,
+}: ConfirmStepProps) {
   const [preview, setPreview] = useState<TransformResponse | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -247,7 +304,13 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
     let cancelled = false;
     setPreview(null);
     const locationId = String(shopify.session.currentSession.locationId);
-    postSerialTransform({sku, serial, locationId, direction, dryRun: true}).then((r) => {
+    postSerialTransform({
+      sku,
+      serial,
+      locationId,
+      direction,
+      dryRun: true,
+    }).then((r) => {
       if (!cancelled) setPreview(r);
     });
     return () => {
@@ -258,7 +321,9 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
   if (!preview) {
     return (
       <s-page heading="Transform serial">
-        <s-text>Checking with Cin7…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Checking with Cin7…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -270,11 +335,19 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
     const outcome = describeOutcome(preview, {serial, target});
     return (
       <s-page heading="Transform serial">
-        <s-banner tone={outcome.tone} heading={outcome.heading}>
-          {outcome.message}
-        </s-banner>
-        {outcome.detail && <s-text>{outcome.detail}</s-text>}
-        <s-button onClick={onBack}>Back</s-button>
+        <s-section>
+          <s-banner tone={outcome.tone} heading={outcome.heading}>
+            {outcome.message}
+          </s-banner>
+          {outcome.detail && (
+            <s-box padding="base none none">
+              <s-text color="subdued">{outcome.detail}</s-text>
+            </s-box>
+          )}
+        </s-section>
+        <s-section>
+          <s-button onClick={onBack}>Back</s-button>
+        </s-section>
       </s-page>
     );
   }
@@ -288,13 +361,33 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
   // banner leading with the consequence rather than the serials, and a
   // de-emphasized Confirm button — rather than growing friction on the
   // common assemble path too.
+  const detailRows: Array<[string, string]> = [
+    ["From", preview.fromSerial],
+    ["To", preview.toSerial],
+    ["Location", locationName ?? "this location"],
+    ["Unit cost", `${preview.unitCost.toFixed(2)} (${COST_SOURCE_LABEL[preview.costSource]})`],
+  ];
   const details = (
-    <>
-      <s-text>{`From: ${preview.fromSerial}`}</s-text>
-      <s-text>{`To: ${preview.toSerial}`}</s-text>
-      <s-text>{`Location: ${locationName ?? "this location"}`}</s-text>
-      <s-text>{`Unit cost: ${preview.unitCost.toFixed(2)} (${COST_SOURCE_LABEL[preview.costSource]})`}</s-text>
-    </>
+    <s-stack direction="block">
+      {detailRows.map(([label, value], index) => (
+        <s-stack key={label} direction="block">
+          {index > 0 && <s-divider />}
+          <s-box padding="base">
+            <s-stack
+              direction="inline"
+              gap="base"
+              justifyContent="space-between"
+              alignItems="center"
+            >
+              <s-text type="small" color="subdued">
+                {label}
+              </s-text>
+              <s-text type="strong">{value}</s-text>
+            </s-stack>
+          </s-box>
+        </s-stack>
+      ))}
+    </s-stack>
   );
 
   return (
@@ -309,32 +402,41 @@ function ConfirmStep({sku, serial, direction, target, locationName, onBack, onRe
       ) : (
         <s-section heading={`${actionLabel(direction)} this serial?`}>{details}</s-section>
       )}
-      <s-button
-        onClick={async () => {
-          // Ref, not state: `submitting` is captured at render time, so two
-          // taps in the same frame would both see `false` and both fire the
-          // write. Cin7 has no idempotency key, so both would land as
-          // separate stock adjustments.
-          if (submittingRef.current) return;
-          submittingRef.current = true;
-          setSubmitting(true);
-          const locationId = String(shopify.session.currentSession.locationId);
-          try {
-            const response = await postSerialTransform({sku, serial, locationId, direction});
-            onResult(response);
-          } finally {
-            submittingRef.current = false;
-            setSubmitting(false);
-          }
-        }}
-        loading={submitting}
-        variant={direction === "disassemble" ? "secondary" : undefined}
-      >
-        Confirm
-      </s-button>
-      <s-button onClick={onBack} disabled={submitting}>
-        Cancel
-      </s-button>
+      <s-section>
+        <s-stack direction="block" gap="base">
+          <s-button
+            onClick={async () => {
+              // Ref, not state: `submitting` is captured at render time, so two
+              // taps in the same frame would both see `false` and both fire the
+              // write. Cin7 has no idempotency key, so both would land as
+              // separate stock adjustments.
+              if (submittingRef.current) return;
+              submittingRef.current = true;
+              setSubmitting(true);
+              const locationId = String(shopify.session.currentSession.locationId);
+              try {
+                const response = await postSerialTransform({
+                  sku,
+                  serial,
+                  locationId,
+                  direction,
+                });
+                onResult(response);
+              } finally {
+                submittingRef.current = false;
+                setSubmitting(false);
+              }
+            }}
+            loading={submitting}
+            variant={direction === "disassemble" ? "secondary" : undefined}
+          >
+            Confirm
+          </s-button>
+          <s-button onClick={onBack} disabled={submitting}>
+            Cancel
+          </s-button>
+        </s-stack>
+      </s-section>
     </s-page>
   );
 }

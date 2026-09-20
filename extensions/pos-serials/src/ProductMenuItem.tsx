@@ -5,5 +5,5 @@ export default async () => {
 };
 
 function ProductMenuItem() {
-  return <s-button onClick={() => shopify.action.presentModal()}>View Serials</s-button>;
+  return <s-button onClick={() => shopify.action.presentModal()}>Serial Numbers</s-button>;
 }

@@ -58,7 +58,9 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
   if (!result) {
     return (
       <s-page heading={line.title}>
-        <s-text>Loading…</s-text>
+        <s-box padding="base">
+          <s-text color="subdued">Loading serial numbers…</s-text>
+        </s-box>
       </s-page>
     );
   }
@@ -66,8 +68,12 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
   if (result.status !== "ok") {
     return (
       <s-page heading={line.title}>
-        <SerialList state={result} sku={line.sku} onRetry={() => setReload((n) => n + 1)} />
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <SerialList state={result} sku={line.sku} onRetry={() => setReload((n) => n + 1)} />
+        </s-section>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-page>
     );
   }
@@ -84,7 +90,9 @@ export function SerialPicker({line, cart, onDone, onChoose}: Props) {
           onSelect={(s) => onChoose(s.serial)}
           searchable
         />
-        <s-button onClick={onDone}>Back</s-button>
+        <s-section>
+          <s-button onClick={onDone}>Back</s-button>
+        </s-section>
       </s-scroll-box>
     </s-page>
   );
