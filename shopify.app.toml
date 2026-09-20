@@ -12,16 +12,16 @@ automatically_update_urls_on_dev = false
 api_version = "2026-10"
 
   [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
 
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_assigned_fulfillment_orders,read_fulfillments,read_locations,read_merchant_managed_fulfillment_orders,read_orders,read_products"
+scopes = "read_assigned_fulfillment_orders,read_customers,read_fulfillments,read_locations,read_merchant_managed_fulfillment_orders,read_orders,read_products"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
