@@ -16,6 +16,12 @@ export const loader = async ({request}: LoaderFunctionArgs) => {
     return cors(Response.json(result));
   } catch (error) {
     if (error instanceof Cin7Error) {
+      // Same reason as the transform route: the client only ever sees the
+      // code, so this log is the only place Cin7's own reason survives.
+      console.error(`[serials] Cin7 lookup failure: ${error.code} — ${error.message}`, {
+        sku,
+        locationId,
+      });
       return cors(Response.json({error: error.code}, {status: 502}));
     }
     throw error;
