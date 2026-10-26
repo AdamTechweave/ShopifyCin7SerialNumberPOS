@@ -339,6 +339,21 @@ device what a typed `100` actually charges before training anyone on it.
 Spare parts never reach Cin7 and have no inventory record. They carry no `productId`,
 and `toCartLine` drops lines without one, so the serial tile ignores them entirely.
 
+### Labour tile
+
+A third POS extension, `extensions/labour`, adds a **Labour** tile that works exactly
+like Spare Parts — same price field, same rules, same tax caveat — but adds:
+
+```ts
+{quantity: 1, title: "Labour", price: <normalised>, taxable: true}
+```
+
+It is a separate extension because a POS extension can render only one home tile. Its
+modal imports `parsePrice` from `extensions/spare-parts/src/lib/price.ts` rather than
+copying it, so both tiles accept and refuse exactly the same amounts; a change there
+changes both. Like Spare Parts it never reaches Cin7, and once deployed it must be added
+to each POS smart grid by hand.
+
 ### Verify everything at once
 
 ```bash
